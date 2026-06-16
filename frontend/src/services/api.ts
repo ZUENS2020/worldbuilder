@@ -39,7 +39,8 @@ async function streamPost(
       if (!line.startsWith('data: ')) continue;
       const data = line.slice(6);
       if (data === '[DONE]') return;
-      onChunk(data);
+      // Restore newlines that were escaped for SSE transport
+      onChunk(data.replace(/\\n/g, '\n'));
     }
   }
 }

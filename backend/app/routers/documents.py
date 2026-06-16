@@ -107,12 +107,15 @@ async def generate_stream(
             async for chunk in ai_generate_scene_stream(
                 context_text, data.scene_description, config=config,
             ):
-                yield f"data: {chunk}\n\n"
+                # Encode newlines so SSE line-splitting doesn't eat them
+                encoded = chunk.replace("\n", "\\n")
+                yield f"data: {encoded}\n\n"
         elif data.mode == "outline":
             async for chunk in ai_generate_outline_stream(
                 context_text, config=config,
             ):
-                yield f"data: {chunk}\n\n"
+                encoded = chunk.replace("\n", "\\n")
+                yield f"data: {encoded}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
