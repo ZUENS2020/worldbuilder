@@ -120,61 +120,67 @@ function App() {
       <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh', background: 'var(--mt-window)', overflow: 'hidden' }}>
         <Toolbar />
 
-        <div style={{ display: 'flex', flex: 1, minHeight: 0, padding: 4, gap: 4 }}>
-          <Palette />
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, padding: viewMode === 'writing' ? 0 : 4, gap: viewMode === 'writing' ? 0 : 4 }}>
+          {/* Full-screen writing mode: hide Palette/Inspector/Timeline */}
+          {viewMode === 'writing' ? (
+            <WritingWorkspace />
+          ) : (
+            <>
+              <Palette />
 
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div className="mt-panel" style={{ flex: 1, minHeight: 0, padding: 0 }}>
-              <div className="mt-panel-title" style={{ justifyContent: 'space-between' }}>
-                <span>{vc.icon} {vc.label}</span>
-                <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                  {/* View mode switcher */}
-                  {(['relations', 'events', 'writing'] as const).map((vm) => (
-                    <button
-                      key={vm}
-                      className={`mt-btn${viewMode === vm ? ' active' : ''}`}
-                      style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
-                      onClick={() => setViewMode(vm)}
-                    >
-                      {viewConfig[vm].icon} {viewConfig[vm].label}
-                    </button>
-                  ))}
-                  <span style={{ width: 8 }} />
-                  <button
-                    className={`mt-btn${showTimeline ? ' active' : ''}`}
-                    style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
-                    onClick={() => setShowTimeline((v) => !v)}
-                  >
-                    ⏳
-                  </button>
-                  <button
-                    className="mt-btn"
-                    style={{ fontSize: 10, padding: '1px 6px', height: 18 }}
-                    onClick={() => setSettingsOpen(true)}
-                  >
-                    ⚙️
-                  </button>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div className="mt-panel" style={{ flex: 1, minHeight: 0, padding: 0 }}>
+                  <div className="mt-panel-title" style={{ justifyContent: 'space-between' }}>
+                    <span>{vc.icon} {vc.label}</span>
+                    <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                      {/* View mode switcher */}
+                      {(['relations', 'events', 'writing'] as const).map((vm) => (
+                        <button
+                          key={vm}
+                          className={`mt-btn${viewMode === vm ? ' active' : ''}`}
+                          style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
+                          onClick={() => setViewMode(vm)}
+                        >
+                          {viewConfig[vm].icon} {viewConfig[vm].label}
+                        </button>
+                      ))}
+                      <span style={{ width: 8 }} />
+                      <button
+                        className={`mt-btn${showTimeline ? ' active' : ''}`}
+                        style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
+                        onClick={() => setShowTimeline((v) => !v)}
+                      >
+                        ⏳
+                      </button>
+                      <button
+                        className="mt-btn"
+                        style={{ fontSize: 10, padding: '1px 6px', height: 18 }}
+                        onClick={() => setSettingsOpen(true)}
+                      >
+                        ⚙️
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-panel-body" style={{ overflow: 'hidden', position: 'relative' }}>
+                    {viewMode === 'relations' && <Canvas />}
+                    {viewMode === 'events' && <EventGraph />}
+                  </div>
                 </div>
+                {showTimeline && <Timeline />}
               </div>
-              <div className="mt-panel-body" style={{ overflow: 'hidden', position: 'relative' }}>
-                {viewMode === 'relations' && <Canvas />}
-                {viewMode === 'events' && <EventGraph />}
-                {viewMode === 'writing' && <WritingWorkspace />}
-              </div>
-            </div>
-            {showTimeline && viewMode !== 'writing' && <Timeline />}
-          </div>
 
-          <div
-            onMouseDown={startResize}
-            title="拖拽调整宽度"
-            style={{ width: 5, cursor: 'col-resize', flex: '0 0 5px', alignSelf: 'stretch', background: 'transparent' }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--mt-sel-border)')}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
-          />
-          <div style={{ width: inspectorWidth, flex: `0 0 ${inspectorWidth}px`, display: 'flex', flexDirection: 'column' }}>
-            <Inspector />
-          </div>
+              <div
+                onMouseDown={startResize}
+                title="拖拽调整宽度"
+                style={{ width: 5, cursor: 'col-resize', flex: '0 0 5px', alignSelf: 'stretch', background: 'transparent' }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--mt-sel-border)')}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
+              />
+              <div style={{ width: inspectorWidth, flex: `0 0 ${inspectorWidth}px`, display: 'flex', flexDirection: 'column' }}>
+                <Inspector />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Status bar */}
