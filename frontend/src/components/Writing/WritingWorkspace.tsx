@@ -2,7 +2,7 @@
  * WritingWorkspace — M4: 全屏写作工作台
  *
  * Full-screen layout (no Palette/Inspector), Markdown rendering,
- * edit / preview / split modes, collapsible saved docs panel.
+ * edit / preview / split modes, left source sidebar + right docs panel.
  */
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
@@ -17,7 +17,7 @@ type GenMode = 'scene' | 'outline';
 type ViewMode = 'edit' | 'preview' | 'split';
 
 export default function WritingWorkspace() {
-  const { entities, project, documents, loadDocuments, addDocument, viewMode: appViewMode, setViewMode: setAppViewMode } = useAppStore();
+  const { entities, project, documents, loadDocuments, addDocument, setViewMode: setAppViewMode } = useAppStore();
   const [mode, setMode] = useState<GenMode>('scene');
   const [editView, setEditView] = useState<ViewMode>('split');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -25,7 +25,6 @@ export default function WritingWorkspace() {
   const [generated, setGenerated] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showEntityPicker, setShowEntityPicker] = useState(false);
   const [showDocs, setShowDocs] = useState(true);
   const [viewingDocId, setViewingDocId] = useState<string | null>(null);
   const genRef = useRef('');
@@ -33,16 +32,23 @@ export default function WritingWorkspace() {
   // Load documents on mount
   useEffect(() => { loadDocuments(); }, []);
 
-  // Entity selector options
-  const selectableEntities = useMemo(() => {
-    return entities.map((e) => ({
-      id: e.id,
-      name: e.name,
-      type: e.type,
-      icon: ENTITY_CONFIG[e.type as EntityType]?.icon || '❓',
-      color: ENTITY_CONFIG[e.type as EntityType]?.color || '#888',
-    }));
+  // Group entities by type for the sidebar
+  const entitiesByType = useMemo(() => {
+    const groups: Record<string, { id: string; name: string; icon: string; color: string }[]> = {};
+    for (const e of entities) {
+      const t = e.type || 'character';
+      if (!groups[t]) groups[t] = [];
+      groups[t].push({
+        id: e.id,
+        name: e.name,
+        icon: ENTITY_CONFIG[e.type as EntityType]?.icon || '❓',
+        color: ENTITY_CONFIG[e.type as EntityType]?.color || '#888',
+      });
+    }
+    return groups;
   }, [entities]);
+
+  const typeOrder: EntityType[] = ['character', 'faction', 'event', 'location', 'item'];
 
   const handleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -100,8 +106,6 @@ export default function WritingWorkspace() {
   }, [documents, mode]);
 
   const viewingDoc = viewingDocId ? documents.find((d) => d.id === viewingDocId) : null;
-
-  // The content to display (generated or viewing doc)
   const displayContent = viewingDoc ? viewingDoc.content : generated;
 
   return (
@@ -145,65 +149,6 @@ export default function WritingWorkspace() {
         </button>
 
         <div style={{ width: 1, height: 18, background: 'var(--mt-border-soft)' }} />
-
-        {/* Entity picker toggle */}
-        <div style={{ position: 'relative' }}>
-          <button
-            className="mt-btn"
-            onClick={() => setShowEntityPicker((v) => !v)}
-            style={{ fontSize: 11, padding: '3px 10px', border: `1px solid ${selectedIds.length > 0 ? 'var(--mt-accent)' : 'var(--mt-border)'}`, background: selectedIds.length > 0 ? 'var(--mt-accent)11' : undefined }}
-          >
-            📚 来源 ({selectedIds.length})
-          </button>
-          {showEntityPicker && (
-            <div style={{
-              position: 'absolute', top: '100%', left: 0, zIndex: 200,
-              background: '#fff', border: '1px solid var(--mt-border)',
-              borderRadius: 6, boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-              width: 280, maxHeight: 400, overflowY: 'auto',
-              marginTop: 4,
-            }}
-              onMouseLeave={() => setShowEntityPicker(false)}
-            >
-              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--mt-border-soft)', fontWeight: 600, fontSize: 12 }}>
-                选择参与实体
-                <span style={{ fontWeight: 400, color: 'var(--mt-text-muted)', marginLeft: 4 }}>2-hop 上下文自动注入</span>
-              </div>
-              {selectableEntities.map((e) => (
-                <div
-                  key={e.id}
-                  onClick={() => handleSelect(e.id)}
-                  style={{
-                    padding: '6px 12px', fontSize: 12, cursor: 'pointer',
-                    background: selectedIds.includes(e.id) ? `${e.color}15` : 'transparent',
-                    borderLeft: selectedIds.includes(e.id) ? `3px solid ${e.color}` : '3px solid transparent',
-                    display: 'flex', alignItems: 'center', gap: 8,
-                  }}
-                  onMouseEnter={(ev) => { if (!selectedIds.includes(e.id)) (ev.currentTarget as HTMLDivElement).style.background = 'var(--mt-btn-hover)'; }}
-                  onMouseLeave={(ev) => { if (!selectedIds.includes(e.id)) (ev.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-                >
-                  <span>{e.icon}</span>
-                  <span style={{ flex: 1 }}>{e.name}</span>
-                  {selectedIds.includes(e.id) && <span style={{ fontSize: 10, color: e.color, fontWeight: 700 }}>✓</span>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Scene description (scene mode) */}
-        {mode === 'scene' && (
-          <input
-            value={sceneDesc}
-            onChange={(e) => setSceneDesc(e.target.value)}
-            placeholder="描述场景（如：鸿门宴上裴青玄试探李长安）..."
-            style={{
-              flex: 1, minWidth: 120, fontSize: 12, padding: '4px 10px',
-              background: '#fff', border: '1px solid var(--mt-border)',
-              borderRadius: 4, color: 'var(--mt-text)', outline: 'none',
-            }}
-          />
-        )}
 
         {/* Generate button */}
         <button
@@ -261,7 +206,112 @@ export default function WritingWorkspace() {
 
       {/* ── Main content area ── */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        {/* Editor / Preview area */}
+
+        {/* ── Left: Source sidebar ── */}
+        <div style={{
+          width: 240, borderRight: '1px solid var(--mt-border)',
+          background: 'var(--mt-panel)', display: 'flex', flexDirection: 'column',
+          flexShrink: 0,
+        }}>
+          <div style={{
+            padding: '10px 14px', borderBottom: '1px solid var(--mt-border)',
+            fontWeight: 600, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            📚 来源选择
+            {selectedIds.length > 0 && (
+              <span style={{
+                fontWeight: 400, fontSize: 10, color: '#fff',
+                background: 'var(--mt-accent)', borderRadius: 8,
+                padding: '0 6px', lineHeight: '16px',
+              }}>
+                {selectedIds.length}
+              </span>
+            )}
+          </div>
+
+          {/* Scene description */}
+          {mode === 'scene' && (
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--mt-border-soft)' }}>
+              <textarea
+                value={sceneDesc}
+                onChange={(e) => setSceneDesc(e.target.value)}
+                placeholder="描述场景（如：鸿门宴上裴青玄试探李长安）..."
+                rows={3}
+                style={{
+                  width: '100%', resize: 'none', fontSize: 12, padding: '6px 8px',
+                  background: 'var(--mt-window)', border: '1px solid var(--mt-border)',
+                  borderRadius: 4, color: 'var(--mt-text)', outline: 'none',
+                  lineHeight: 1.5,
+                }}
+              />
+            </div>
+          )}
+
+          {/* Entity list grouped by type */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+            <div style={{ padding: '2px 12px 6px', fontSize: 10, color: 'var(--mt-text-muted)' }}>
+              选择参与实体（2-hop 上下文将自动注入）
+            </div>
+            {typeOrder.map((t) => {
+              const list = entitiesByType[t];
+              if (!list || list.length === 0) return null;
+              const cfg = ENTITY_CONFIG[t];
+              return (
+                <div key={t}>
+                  <div style={{
+                    padding: '4px 12px', fontSize: 10, fontWeight: 700,
+                    color: cfg.color, display: 'flex', alignItems: 'center', gap: 4,
+                    borderTop: '1px solid var(--mt-border-soft)',
+                    background: 'rgba(255,255,255,0.5)',
+                  }}>
+                    {cfg.icon} {cfg.label}
+                  </div>
+                  {list.map((e) => {
+                    const on = selectedIds.includes(e.id);
+                    return (
+                      <div
+                        key={e.id}
+                        onClick={() => handleSelect(e.id)}
+                        style={{
+                          padding: '4px 12px 4px 24px', fontSize: 12, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          background: on ? `${e.color}12` : 'transparent',
+                          borderLeft: on ? `3px solid ${e.color}` : '3px solid transparent',
+                        }}
+                        onMouseEnter={(ev) => { if (!on) (ev.currentTarget as HTMLDivElement).style.background = 'var(--mt-btn-hover)'; }}
+                        onMouseLeave={(ev) => { if (!on) (ev.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                      >
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {e.name}
+                        </span>
+                        {on && <span style={{ fontSize: 10, color: e.color, fontWeight: 700, flexShrink: 0 }}>✓</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Generate button at bottom */}
+          <div style={{ padding: '10px 12px', borderTop: '1px solid var(--mt-border)' }}>
+            <button
+              className="mt-btn active"
+              onClick={handleGenerate}
+              disabled={streaming || selectedIds.length === 0}
+              style={{
+                width: '100%', fontWeight: 600, fontSize: 12,
+                border: '1px solid var(--mt-accent)',
+                opacity: selectedIds.length === 0 ? 0.5 : 1,
+                justifyContent: 'center',
+              }}
+            >
+              {streaming ? '⏳ 生成中...' : `✨ 生成${mode === 'scene' ? '场景正文' : '大纲'}`}
+            </button>
+          </div>
+        </div>
+
+        {/* ── Center: Editor / Preview ── */}
         <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
           {/* Empty state */}
           {!displayContent && !streaming && !viewingDoc && (
@@ -271,7 +321,7 @@ export default function WritingWorkspace() {
             }}>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 48, marginBottom: 16 }}>✍️</div>
-                选择来源实体，点击「生成」开始创作<br />
+                从左侧选择来源实体，点击「生成」开始创作<br />
                 <span style={{ fontSize: 12 }}>2-hop 图谱上下文将自动注入到 Prompt 中</span>
               </div>
             </div>
