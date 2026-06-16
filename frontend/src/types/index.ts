@@ -48,6 +48,20 @@ export interface GraphContext {
   token_count: number;
 }
 
+// Custom tag (folder) for user-defined grouping in the palette
+export interface Tag {
+  id: string;
+  name: string;
+  color: string;
+  entityIds: string[];
+}
+
+// Color palette for custom tags (folders)
+export const TAG_COLORS = [
+  '#3a7bd5', '#2faa5e', '#e08a1e', '#8e5cc4', '#d24b43',
+  '#00bcd4', '#ff9800', '#795548', '#607d8b', '#e91e63',
+];
+
 // Visual config per entity type (Maltego-style palette)
 // Characters are the PRIMARY nodes — bigger, more prominent.
 // Factions/events/locations are SECONDARY — smaller, satellite.

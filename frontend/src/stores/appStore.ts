@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Entity, Relation, Project, TransformDef, TransformResult } from '../types';
+import type { Entity, Relation, Project, TransformDef, TransformResult, Tag } from '../types';
 import { api } from '../services/api';
 
 interface AICandidate {
@@ -89,6 +89,14 @@ interface AppState {
   // Settings dialog
   settingsOpen: boolean;
   setSettingsOpen: (b: boolean) => void;
+
+  // Custom tags (folders) for user-defined entity grouping
+  tags: Tag[];
+  addTag: (name: string, color: string) => void;
+  removeTag: (id: string) => void;
+  renameTag: (id: string, name: string) => void;
+  addEntityToTag: (entityId: string, tagId: string) => void;
+  removeEntityFromTag: (entityId: string, tagId: string) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -106,7 +114,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         api.listEntities(projectId),
         api.listRelations(projectId),
       ]);
-      set({ project, entities, relations, loading: false });
+      const tags: Tag[] = Array.isArray(project?.settings?.tags) ? project.settings.tags : [];
+      set({ project, entities, relations, tags, loading: false });
     } catch (e) {
       console.error('Failed to load project:', e);
       set({ loading: false });
@@ -283,4 +292,68 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Settings
   settingsOpen: false,
   setSettingsOpen: (b) => set({ settingsOpen: b }),
+
+  // ── Custom tags (folders) ──
+  // Tags are persisted in Project.settings.tags and also synced to the backend
+  tags: [],
+
+  addTag: (name, color) => {
+    const id = `tag-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const newTag: Tag = { id, name, color, entityIds: [] };
+    set((s) => {
+      const tags = [...s.tags, newTag];
+      _persistTags(tags, s.project);
+      return { tags };
+    });
+  },
+
+  removeTag: (id) => {
+    set((s) => {
+      const tags = s.tags.filter((t) => t.id !== id);
+      _persistTags(tags, s.project);
+      return { tags };
+    });
+  },
+
+  renameTag: (id, name) => {
+    set((s) => {
+      const tags = s.tags.map((t) => t.id === id ? { ...t, name } : t);
+      _persistTags(tags, s.project);
+      return { tags };
+    });
+  },
+
+  addEntityToTag: (entityId, tagId) => {
+    set((s) => {
+      const tags = s.tags.map((t) =>
+        t.id === tagId && !t.entityIds.includes(entityId)
+          ? { ...t, entityIds: [...t.entityIds, entityId] }
+          : t
+      );
+      _persistTags(tags, s.project);
+      return { tags };
+    });
+  },
+
+  removeEntityFromTag: (entityId, tagId) => {
+    set((s) => {
+      const tags = s.tags.map((t) =>
+        t.id === tagId
+          ? { ...t, entityIds: t.entityIds.filter((eid) => eid !== entityId) }
+          : t
+      );
+      _persistTags(tags, s.project);
+      return { tags };
+    });
+  },
 }));
+
+/** Persist tags into Project.settings.tags and sync to backend. */
+function _persistTags(tags: Tag[], project: Project | null) {
+  if (!project) return;
+  project.settings = { ...project.settings, tags };
+  // Fire-and-forget backend sync
+  api.updateProject(project.id, { settings: project.settings }).catch((e) =>
+    console.error('Failed to persist tags:', e)
+  );
+}
