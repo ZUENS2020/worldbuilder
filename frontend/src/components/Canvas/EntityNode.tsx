@@ -152,17 +152,21 @@ function EntityNode({ data, selected }: NodeProps) {
         </div>
       )}
 
-      {/* ── Label ── */}
+      {/* ── Label with background pill ── */}
       <div style={{
         marginTop: isChar ? 5 : 3,
-        maxWidth: isChar ? 120 : 90,
+        padding: '2px 6px',
+        borderRadius: 3,
+        background: 'rgba(255,255,255,0.92)',
+        border: `1px solid ${selected ? config.color : 'var(--mt-border-soft)'}`,
+        maxWidth: isChar ? 128 : 100,
         textAlign: 'center',
-        fontSize: isChar ? 12 : 10,
+        fontSize: isChar ? 11 : 10,
         color: 'var(--mt-text)',
-        lineHeight: 1.2,
+        lineHeight: 1.25,
         wordBreak: 'break-word',
         fontWeight: selected ? 700 : isChar ? 600 : 400,
-        textShadow: '0 1px 2px #fff, 0 0 2px #fff',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
       }}>
         {entity.name}
       </div>
@@ -172,7 +176,8 @@ function EntityNode({ data, selected }: NodeProps) {
           marginTop: 2, fontSize: 8, color: config.color,
           maxWidth: 100, textAlign: 'center', lineHeight: 1.1,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          opacity: 0.75,
+          opacity: 0.75, padding: '1px 4px',
+          background: 'rgba(255,255,255,0.8)', borderRadius: 2,
         }}>
           {String(entity.properties.goal).slice(0, 20)}
         </div>

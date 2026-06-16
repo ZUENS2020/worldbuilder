@@ -92,8 +92,8 @@ export async function calculateLayout(
  * Characters in the same faction are grouped into angular wedges so
  * their affiliated faction node sits behind them (like a fan).
  */
-const RING_GAP = 200;
-const CENTER = { x: 600, y: 460 };
+const RING_GAP = 260;
+const CENTER = { x: 800, y: 600 };
 
 export function radialLayout(nodes: Node[], edges: Edge[], focusId?: string): Node[] {
   if (nodes.length === 0) return nodes;

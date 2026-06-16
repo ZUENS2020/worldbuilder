@@ -14,22 +14,22 @@
 export interface SimNode { id: string; x: number; y: number; vx: number; vy: number; fixed: boolean; type?: string }
 export interface SimLink { source: string; target: string }
 
-const REPULSION = 3500;     // charge strength (lower = less scatter)
-const LINK_DIST = 200;      // spring rest length
-const LINK_STRENGTH = 0.12; // spring stiffness (higher = tighter clusters)
-const CENTER_STRENGTH = 0.008;
-const COLLIDE_R = 80;       // min distance between node centres
-const DAMPING = 0.88;
-const ALPHA_DECAY = 0.012;
-const ALPHA_MIN = 0.005;
-const MAX_VEL = 25;
-const TYPE_BIAS = 0.004;    // same-type weak attraction
+const REPULSION = 8000;     // charge strength — strong repulsion to prevent overlap
+const LINK_DIST = 280;      // spring rest length — generous spacing
+const LINK_STRENGTH = 0.08; // spring stiffness
+const CENTER_STRENGTH = 0.003;
+const COLLIDE_R = 140;      // min distance between node centres — must exceed actual node size
+const DAMPING = 0.85;
+const ALPHA_DECAY = 0.008;
+const ALPHA_MIN = 0.003;
+const MAX_VEL = 20;
+const TYPE_BIAS = 0.003;    // same-type weak attraction
 
 export class ForceSimulation {
   nodes = new Map<string, SimNode>();
   links: SimLink[] = [];
   alpha = 1;
-  center = { x: 600, y: 460 };
+  center = { x: 800, y: 600 };
 
   /** Sync the node set + links, preserving velocities of existing nodes. */
   setData(positions: { id: string; x: number; y: number; type?: string }[], links: SimLink[], center?: { x: number; y: number }) {
