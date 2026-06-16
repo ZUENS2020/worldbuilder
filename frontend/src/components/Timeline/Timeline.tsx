@@ -16,13 +16,22 @@ export default function Timeline() {
     });
   }, [entities]);
 
-  // Get event participants
+  // Get event participants: both directions (source→event and event→source)
+  // and multiple relation types that imply participation
+  const PARTICIPANT_TYPES = ['participated', 'caused', 'member_of'];
   const getParticipants = (eventId: string) => {
     return relations
-      .filter((r) => r.target_id === eventId && r.type === 'participated')
+      .filter((r) => {
+        if (r.target_id !== eventId && r.source_id !== eventId) return false;
+        return PARTICIPANT_TYPES.includes(r.type);
+      })
       .map((r) => {
-        const entity = entities.find((e) => e.id === r.source_id);
-        return entity ? { ...entity, role: r.properties?.role || '' } : null;
+        // If relation points TO event, participant is source; otherwise target
+        const participantId = r.target_id === eventId ? r.source_id : r.target_id;
+        const entity = entities.find((e) => e.id === participantId);
+        if (!entity) return null;
+        const role = r.properties?.result || r.properties?.role || r.properties?.description || '';
+        return { ...entity, role };
       })
       .filter(Boolean) as (Entity & { role: string })[];
   };
@@ -132,12 +141,15 @@ export default function Timeline() {
                   {/* Participants */}
                   {participants.length > 0 && (
                     <div style={{ marginTop: 2, textAlign: 'center' }}>
-                      {participants.map((p) => (
-                        <div key={p.id} style={{ fontSize: 8, color: 'var(--mt-text-muted)' }}>
-                          {ENTITY_CONFIG.character.icon} {p.name}
-                          {p.role && <span style={{ color: 'var(--mt-text-faint)' }}> ({p.role})</span>}
-                        </div>
-                      ))}
+                      {participants.map((p) => {
+                        const pCfg = ENTITY_CONFIG[p.type] || ENTITY_CONFIG.character;
+                        return (
+                          <div key={p.id} style={{ fontSize: 8, color: 'var(--mt-text-muted)' }}>
+                            {pCfg.icon} {p.name}
+                            {p.role && <span style={{ color: 'var(--mt-text-faint)' }}> ({p.role.length > 12 ? p.role.slice(0, 12) + '…' : p.role})</span>}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
