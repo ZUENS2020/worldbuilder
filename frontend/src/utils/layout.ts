@@ -271,7 +271,7 @@ export function radialLayout(nodes: Node[], edges: Edge[], focusId?: string): No
   }
 
   // ── Step 5: Compute positions ──
-  return nodes.map((n) => {
+  const positioned = nodes.map((n) => {
     const lvl = level.get(n.id) ?? 1;
     const ang = angle.get(n.id) ?? 0;
     if (lvl === 0) return { ...n, position: { ...CENTER } };
@@ -285,4 +285,40 @@ export function radialLayout(nodes: Node[], edges: Edge[], focusId?: string): No
       },
     };
   });
+
+  // ── Step 6: Resolve overlaps ──
+  // Push apart any nodes whose bounding boxes overlap.
+  // Characters need ~130px clearance (62px circle + label), others ~80px.
+  return resolveOverlaps(positioned);
+}
+
+/**
+ * Iterative overlap resolution: for each pair of nodes that are too close,
+ * push them apart along the line connecting them. Runs a few passes.
+ */
+function resolveOverlaps(nodes: Node[], passes = 8): Node[] {
+  const MIN_GAP = 130; // minimum centre-to-centre distance
+  const result = nodes.map((n) => ({ ...n, position: { ...n.position } }));
+
+  for (let pass = 0; pass < passes; pass++) {
+    let moved = false;
+    for (let i = 0; i < result.length; i++) {
+      for (let j = i + 1; j < result.length; j++) {
+        const a = result[i], b = result[j];
+        const dx = a.position.x - b.position.x;
+        const dy = a.position.y - b.position.y;
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (d < MIN_GAP) {
+          moved = true;
+          // Push apart equally along the connecting line
+          const push = (MIN_GAP - d) / 2 + 2; // +2 for a tiny margin
+          const ux = dx / d, uy = dy / d;
+          a.position = { x: a.position.x + ux * push, y: a.position.y + uy * push };
+          b.position = { x: b.position.x - ux * push, y: b.position.y - uy * push };
+        }
+      }
+    }
+    if (!moved) break; // converged
+  }
+  return result;
 }

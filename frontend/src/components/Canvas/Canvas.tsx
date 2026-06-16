@@ -229,24 +229,45 @@ export default function Canvas() {
   // Clean up the animation frame on unmount
   useEffect(() => stopLoop, [stopLoop]);
 
-  // "Apply layout" button (toolbar)
+  // "Apply layout" button (toolbar) + "Tidy up" button
   const handledNonce = useRef(layoutNonce);
   useEffect(() => {
     if (layoutNonce === handledNonce.current) return;
     handledNonce.current = layoutNonce;
+
+    // Stop any running force sim
+    stopLoop();
+
+    // For tidyUp / radial: clear cached positions and recompute from scratch
+    // so the layout isn't biased by old positions
+    const freshNodes = buildGraphData(entities, relations, undefined, relationFilter).nodes;
+    const freshEdges = buildGraphData(entities, relations, undefined, relationFilter).edges;
+
     if (layoutType === 'force') {
-      startSim(1);
+      // Force: seed from radial first, then sim
+      (async () => {
+        setLayouting(true);
+        try {
+          const radialSeed = await calculateLayout(freshNodes, freshEdges, 'radial', selectedEntityId ?? undefined);
+          radialSeed.forEach((n) => nodePositions.current.set(n.id, n.position));
+          setNodes(radialSeed);
+        } catch (e) {
+          console.error('Radial seed failed:', e);
+        }
+        setLayouting(false);
+        startSim(1);
+      })();
       return;
     }
-    // Static layouts (radial / hierarchical): stop the sim and place once.
-    stopLoop();
+
+    // Static layouts (radial / hierarchical): compute from scratch
     (async () => {
       setLayouting(true);
       try {
-        const laidOut = await calculateLayout(nodes, edges, layoutType, selectedEntityId ?? undefined);
+        const laidOut = await calculateLayout(freshNodes, freshEdges, layoutType, selectedEntityId ?? undefined);
         setNodes(laidOut);
         laidOut.forEach((n) => nodePositions.current.set(n.id, n.position));
-        window.requestAnimationFrame(() => rf.fitView({ padding: 0.2, duration: 400 }));
+        window.requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 500 }));
       } catch (e) {
         console.error('Layout failed:', e);
       }

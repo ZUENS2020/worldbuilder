@@ -16,6 +16,7 @@ export default function Toolbar() {
   const rf = useReactFlow();
   const {
     layoutType, setLayoutType, requestAutoLayout, layouting, setCreateOpen,
+    tidyUp,
   } = useAppStore();
 
   const layouts: { id: LayoutType; label: string; icon: string }[] = [
@@ -45,6 +46,19 @@ export default function Toolbar() {
       <Group label="实体">
         <button className="mt-btn" onClick={() => setCreateOpen(true)} title="新建实体 (Add Entity)">
           <span style={{ fontSize: 14 }}>➕</span> 新建实体
+        </button>
+      </Group>
+      <div className="mt-sep" />
+
+      <Group label="整理">
+        <button
+          className="mt-btn"
+          onClick={tidyUp}
+          disabled={layouting}
+          title="一键整理：以人物为中心重新排列，同阵营聚拢，消除重叠"
+          style={{ fontWeight: 600, fontSize: 12, padding: '4px 12px' }}
+        >
+          {layouting ? <span className="mt-spin">⏳</span> : '✨'} 整理
         </button>
       </Group>
       <div className="mt-sep" />

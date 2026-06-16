@@ -70,6 +70,7 @@ interface AppState {
   setLayoutType: (l: LayoutType) => void;
   layoutNonce: number;
   requestAutoLayout: () => void;
+  tidyUp: () => void;
   layouting: boolean;
   setLayouting: (b: boolean) => void;
   createOpen: boolean;
@@ -242,6 +243,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   setLayoutType: (l) => set({ layoutType: l }),
   layoutNonce: 0,
   requestAutoLayout: () => set((s) => ({ layoutNonce: s.layoutNonce + 1 })),
+  tidyUp: () => set((s) => ({
+    layoutType: 'radial' as LayoutType,
+    layoutNonce: s.layoutNonce + 1,
+  })),
   layouting: false,
   setLayouting: (b) => set({ layouting: b }),
   createOpen: false,
