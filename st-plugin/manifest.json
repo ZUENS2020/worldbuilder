@@ -1,0 +1,42 @@
+{
+  "name": "WorldBuilder Context",
+  "id": "worldbuilder-context",
+  "version": "0.1.0",
+  "description": "Injects WorldBuilder knowledge graph context into SillyTavern conversations using 2-hop graph distance for precise, anti-OOC prompt injection.",
+  "author": "WorldBuilder",
+  "api": 2,
+  "settings": {
+    "worldbuilder_url": {
+      "label": "WorldBuilder API URL",
+      "type": "text",
+      "default": "http://localhost:8000",
+      "description": "The base URL of your WorldBuilder backend"
+    },
+    "project_id": {
+      "label": "Project ID",
+      "type": "text",
+      "default": "",
+      "description": "Your WorldBuilder project ID (auto-detected if empty)"
+    },
+    "max_hop": {
+      "label": "Max Hop Distance",
+      "type": "number",
+      "default": 2,
+      "min": 1,
+      "max": 5,
+      "description": "How many hops to traverse in the knowledge graph for context injection"
+    },
+    "injection_position": {
+      "label": "Injection Position",
+      "type": "select",
+      "options": ["before_char", "after_char", "before_system"],
+      "default": "before_char",
+      "description": "Where to inject the graph context in the prompt"
+    },
+    "enabled": {
+      "label": "Enabled",
+      "type": "checkbox",
+      "default": true
+    }
+  }
+}

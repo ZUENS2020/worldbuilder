@@ -1,0 +1,136 @@
+/* ===========================================================================
+   WorldBuilder — Maltego Classic-style light theme
+   =========================================================================== */
+:root {
+  /* Chrome / window */
+  --mt-window: #f0f0f0;
+  --mt-panel: #ffffff;
+  --mt-panel-header: #e9e9e9;
+  --mt-panel-header-2: #fbfbfb;
+  --mt-border: #c8c8c8;
+  --mt-border-soft: #e2e2e2;
+
+  /* Canvas */
+  --mt-canvas: #ffffff;
+  --mt-grid: #e6edf3;
+
+  /* Accent / selection (Maltego azure) */
+  --mt-accent: #2f7fd1;
+  --mt-accent-dark: #1f5fa8;
+  --mt-sel-fill: #d6ebff;
+  --mt-sel-border: #4a9fe8;
+
+  /* Buttons (Windows ribbon style) */
+  --mt-btn-hover: #e5f1fb;
+  --mt-btn-hover-border: #b8def5;
+  --mt-btn-active: #cce4f7;
+  --mt-btn-active-border: #8fc4ec;
+
+  /* Text */
+  --mt-text: #2b2b2b;
+  --mt-text-muted: #8a8a8a;
+  --mt-text-faint: #aeaeae;
+
+  /* Entity type colors */
+  --c-character: #3a7bd5;
+  --c-location:  #2faa5e;
+  --c-event:     #e08a1e;
+  --c-item:      #8e5cc4;
+  --c-faction:   #d24b43;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--mt-window);
+  color: var(--mt-text);
+  font-family: "Segoe UI", Tahoma, -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+  font-size: 12px;
+}
+
+/* --- Maltego panel primitives --- */
+.mt-panel {
+  background: var(--mt-panel);
+  border: 1px solid var(--mt-border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.mt-panel-title {
+  height: 23px;
+  flex: 0 0 23px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #444;
+  background: linear-gradient(var(--mt-panel-header-2), var(--mt-panel-header));
+  border-bottom: 1px solid var(--mt-border);
+  user-select: none;
+}
+.mt-panel-body { flex: 1; min-height: 0; overflow: auto; }
+
+/* --- ribbon / toolbar buttons --- */
+.mt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--mt-text);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px 8px;
+  white-space: nowrap;
+  user-select: none;
+}
+.mt-btn:hover { background: var(--mt-btn-hover); border-color: var(--mt-btn-hover-border); }
+.mt-btn:active { background: var(--mt-btn-active); border-color: var(--mt-btn-active-border); }
+.mt-btn.active { background: var(--mt-btn-active); border-color: var(--mt-btn-active-border); }
+.mt-btn:disabled { color: var(--mt-text-faint); cursor: default; background: transparent; border-color: transparent; }
+
+.mt-sep { width: 1px; align-self: stretch; background: var(--mt-border); margin: 4px 3px; }
+
+/* --- ReactFlow light overrides --- */
+.react-flow { background: var(--mt-canvas); }
+.react-flow__controls {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15) !important;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.react-flow__controls button {
+  background: #fbfbfb !important;
+  border-bottom: 1px solid var(--mt-border) !important;
+  color: #444 !important;
+  fill: #444 !important;
+  width: 22px; height: 22px;
+}
+.react-flow__controls button:hover { background: var(--mt-btn-hover) !important; }
+.react-flow__controls button svg { fill: #444 !important; }
+.react-flow__minimap { border: 1px solid var(--mt-border) !important; box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
+.react-flow__attribution { display: none !important; }
+.react-flow__handle { opacity: 0; }
+.react-flow__node:hover .react-flow__handle { opacity: 0.6; }
+.react-flow__edge-path { transition: stroke 0.12s; }
+
+/* --- scrollbars --- */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: #f4f4f4; }
+::-webkit-scrollbar-thumb { background: #c4c4c4; border: 3px solid #f4f4f4; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #a9a9a9; }
+
+input, textarea, select, button { font-family: inherit; }
+
+@keyframes mt-spin { to { transform: rotate(360deg); } }
+.mt-spin { display: inline-block; animation: mt-spin 0.9s linear infinite; }

@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+venv/
+.venv/
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Database
+*.db
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude Code session data
+.claude/worktrees/
