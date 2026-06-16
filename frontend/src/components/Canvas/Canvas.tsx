@@ -32,6 +32,10 @@ import { ForceSimulation } from '../../utils/forceSim';
 const nodeTypes = { entity: EntityNode };
 const edgeTypes = { relation: RelationEdge };
 
+// Link type categories for the OSINT-style filter bar
+const CHAR_LINK_TYPES = ['ally', 'enemy', 'rival', 'lover', 'family', 'mentor', 'subordinate'];
+const ASSOC_LINK_TYPES = ['member_of', 'participated', 'caused', 'followed_by', 'holds', 'owns'];
+
 function buildGraphData(
   entities: Entity[],
   relations: Relation[],
@@ -365,7 +369,7 @@ export default function Canvas() {
           maskColor="rgba(220,232,245,0.55)"
         />
 
-        {/* Relation filter (bottom-left dock) */}
+        {/* Relation filter (bottom-left dock) — OSINT link-type categories */}
         {relationTypes.length > 0 && (
           <Panel position="bottom-left">
             <div
@@ -378,11 +382,11 @@ export default function Canvas() {
                 gap: 4,
                 alignItems: 'center',
                 flexWrap: 'wrap',
-                maxWidth: 460,
+                maxWidth: 520,
                 boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
               }}
             >
-              <span style={{ color: 'var(--mt-text-muted)', fontSize: 10, marginRight: 2 }}>关系筛选</span>
+              <span style={{ color: 'var(--mt-text-muted)', fontSize: 10, marginRight: 2 }}>链路类型</span>
               <button
                 className={`mt-btn${!relationFilter ? ' active' : ''}`}
                 style={{ fontSize: 10, padding: '2px 7px', border: '1px solid var(--mt-border)' }}
@@ -390,7 +394,11 @@ export default function Canvas() {
               >
                 全部
               </button>
-              {relationTypes.map((rt) => {
+              {/* Group 1: Character links (rival/ally/mentor/family/enemy) */}
+              {CHAR_LINK_TYPES.filter(t => relationTypes.includes(t)).length > 0 && (
+                <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>│ 人物</span>
+              )}
+              {CHAR_LINK_TYPES.filter(t => relationTypes.includes(t)).map((rt) => {
                 const config = RELATION_CONFIG[rt] || { color: '#888', label: rt };
                 const on = relationFilter === rt;
                 return (
@@ -399,8 +407,31 @@ export default function Canvas() {
                     onClick={() => setRelationFilter(on ? undefined : rt)}
                     className="mt-btn"
                     style={{
-                      fontSize: 10,
-                      padding: '2px 7px',
+                      fontSize: 10, padding: '2px 7px',
+                      border: `1px solid ${on ? config.color : 'var(--mt-border)'}`,
+                      background: on ? `${config.color}22` : 'transparent',
+                      color: on ? config.color : 'var(--mt-text)',
+                      fontWeight: on ? 600 : 400,
+                    }}
+                  >
+                    {config.label}
+                  </button>
+                );
+              })}
+              {/* Group 2: Association links */}
+              {ASSOC_LINK_TYPES.filter(t => relationTypes.includes(t)).length > 0 && (
+                <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>│ 关联</span>
+              )}
+              {ASSOC_LINK_TYPES.filter(t => relationTypes.includes(t)).map((rt) => {
+                const config = RELATION_CONFIG[rt] || { color: '#888', label: rt };
+                const on = relationFilter === rt;
+                return (
+                  <button
+                    key={rt}
+                    onClick={() => setRelationFilter(on ? undefined : rt)}
+                    className="mt-btn"
+                    style={{
+                      fontSize: 10, padding: '2px 7px',
                       border: `1px solid ${on ? config.color : 'var(--mt-border)'}`,
                       background: on ? `${config.color}22` : 'transparent',
                       color: on ? config.color : 'var(--mt-text)',
@@ -410,6 +441,24 @@ export default function Canvas() {
                   </button>
                 );
               })}
+              {/* Group 3: Infrastructure links (located_at) — toggle */}
+              {relationTypes.includes('located_at') && (
+                <>
+                  <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>│ 基础</span>
+                  <button
+                    onClick={() => setRelationFilter(relationFilter === 'located_at' ? undefined : 'located_at')}
+                    className="mt-btn"
+                    style={{
+                      fontSize: 10, padding: '2px 7px',
+                      border: `1px solid ${relationFilter === 'located_at' ? '#999' : 'var(--mt-border)'}`,
+                      background: relationFilter === 'located_at' ? '#9992' : 'transparent',
+                      color: relationFilter === 'located_at' ? '#666' : 'var(--mt-text-muted)',
+                    }}
+                  >
+                    📍 位置
+                  </button>
+                </>
+              )}
             </div>
           </Panel>
         )}

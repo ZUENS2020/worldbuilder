@@ -49,12 +49,14 @@ export interface GraphContext {
 }
 
 // Visual config per entity type (Maltego-style palette)
-export const ENTITY_CONFIG: Record<EntityType, { color: string; icon: string; label: string }> = {
-  character: { color: '#3a7bd5', icon: '👤', label: '人物' },
-  location:  { color: '#2faa5e', icon: '📍', label: '地点' },
-  event:     { color: '#e08a1e', icon: '⚡', label: '事件' },
-  item:      { color: '#8e5cc4', icon: '💎', label: '物品' },
-  faction:   { color: '#d24b43', icon: '⚔️', label: '阵营' },
+// Characters are the PRIMARY nodes — bigger, more prominent.
+// Factions/events/locations are SECONDARY — smaller, satellite.
+export const ENTITY_CONFIG: Record<EntityType, { color: string; icon: string; label: string; size: number; shape: 'circle' | 'diamond' | 'hexagon' | 'rect' }> = {
+  character: { color: '#3a7bd5', icon: '👤', label: '人物', size: 62, shape: 'circle' },
+  location:  { color: '#2faa5e', icon: '📍', label: '地点', size: 44, shape: 'diamond' },
+  event:     { color: '#e08a1e', icon: '⚡', label: '事件', size: 44, shape: 'hexagon' },
+  item:      { color: '#8e5cc4', icon: '💎', label: '物品', size: 44, shape: 'diamond' },
+  faction:   { color: '#d24b43', icon: '⚔️', label: '阵营', size: 50, shape: 'rect' },
 };
 
 // Entity types grouped into palette categories (like Maltego's Entity Palette)
