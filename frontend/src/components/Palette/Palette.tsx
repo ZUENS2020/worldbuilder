@@ -7,8 +7,8 @@ export const DND_MIME = 'application/worldbuilder-entity-type';
 
 export default function Palette() {
   const {
-    addEntity, project, entities, setSelectedEntity, selectedEntityId,
-    createOpen, setCreateOpen,
+    addEntity, project, entities, selectedEntityId,
+    createOpen, setCreateOpen, focusOnEntity,
     tags, addTag, removeTag, renameTag, addEntityToTag, removeEntityFromTag,
   } = useAppStore();
 
@@ -223,7 +223,7 @@ export default function Palette() {
                   selected={selectedEntityId === e.id}
                   tags={tags}
                   tagColor={c.color}
-                  onSelect={() => setSelectedEntity(e.id)}
+                  onSelect={() => focusOnEntity(e.id)}
                   onAddToTag={addEntityToTag}
                   onRemoveFromTag={removeEntityFromTag}
                   entityMenuId={entityMenuId}
@@ -326,7 +326,7 @@ export default function Palette() {
                       selected={selectedEntityId === e.id}
                       tags={tags}
                       tagColor={tag.color}
-                      onSelect={() => setSelectedEntity(e.id)}
+                      onSelect={() => focusOnEntity(e.id)}
                       onAddToTag={addEntityToTag}
                       onRemoveFromTag={removeEntityFromTag}
                       entityMenuId={entityMenuId}
@@ -376,7 +376,7 @@ export default function Palette() {
                       selected={selectedEntityId === e.id}
                       tags={tags}
                       tagColor="#999"
-                      onSelect={() => setSelectedEntity(e.id)}
+                      onSelect={() => focusOnEntity(e.id)}
                       onAddToTag={addEntityToTag}
                       onRemoveFromTag={removeEntityFromTag}
                       entityMenuId={entityMenuId}
