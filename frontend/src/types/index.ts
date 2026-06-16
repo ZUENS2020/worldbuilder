@@ -28,6 +28,8 @@ export interface Project {
   name: string;
   description: string;
   settings: Record<string, any>;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface TransformDef {
@@ -61,6 +63,25 @@ export const TAG_COLORS = [
   '#3a7bd5', '#2faa5e', '#e08a1e', '#8e5cc4', '#d24b43',
   '#00bcd4', '#ff9800', '#795548', '#607d8b', '#e91e63',
 ];
+
+// Custom relation type (user-defined, persisted in Project.settings.customRelationTypes)
+export interface CustomRelationType {
+  id: string;
+  name: string;
+  color: string;
+  style: 'solid' | 'dashed' | 'dotted';
+}
+
+/** Merge built-in RELATION_CONFIG with custom types. Custom types use their id as the key. */
+export function getRelationConfig(customTypes?: CustomRelationType[]): Record<string, { color: string; style: string; label: string }> {
+  const merged: Record<string, { color: string; style: string; label: string }> = { ...RELATION_CONFIG };
+  if (customTypes) {
+    for (const ct of customTypes) {
+      merged[ct.id] = { color: ct.color, style: ct.style, label: ct.name };
+    }
+  }
+  return merged;
+}
 
 // Visual config per entity type (Maltego-style palette)
 // Characters are the PRIMARY nodes — bigger, more prominent.

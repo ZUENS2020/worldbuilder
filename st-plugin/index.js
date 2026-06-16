@@ -1,18 +1,24 @@
 /**
- * WorldBuilder Context Plugin for SillyTavern
+ * WorldBuilder Context Plugin for SillyTavern (UI extension)
  *
- * Intercepts chat messages, extracts character names,
- * queries the WorldBuilder graph API for 2-hop context,
- * and injects it into the system prompt.
+ * Intercepts the chat-completion prompt right before it is sent to the AI,
+ * extracts character names from the conversation, queries the WorldBuilder
+ * graph API for 2-hop context, and injects it into the prompt.
  *
- * This is the core differentiator vs Lorebook:
+ * Differentiator vs Lorebook:
  * - Graph distance-based injection (2-hop) instead of keyword matching
  * - Precise token usage, no "character bleed"
  * - Active contradiction warnings
+ *
+ * Compatible with SillyTavern 1.18 extension API:
+ * - Loaded via manifest.json `js` entry point.
+ * - Hooks the CHAT_COMPLETION_PROMPT_READY event whose payload is { chat, dryRun }.
+ * - Persists settings through getContext().extensionSettings + saveSettingsDebounced().
  */
 
-// SillyTavern extension API
-let extensionSettings = {
+const MODULE_NAME = 'worldbuilder';
+
+const defaultSettings = {
     worldbuilder_url: 'http://localhost:8000',
     project_id: '',
     max_hop: 2,
@@ -20,12 +26,36 @@ let extensionSettings = {
     enabled: true,
 };
 
+// Resolved against the live SillyTavern context inside jQuery ready.
+let settings = { ...defaultSettings };
+
+function getSettings() {
+    const context = SillyTavern.getContext();
+    if (!context.extensionSettings[MODULE_NAME]) {
+        context.extensionSettings[MODULE_NAME] = { ...defaultSettings };
+    }
+    // Backfill any keys added in newer versions.
+    for (const key of Object.keys(defaultSettings)) {
+        if (context.extensionSettings[MODULE_NAME][key] === undefined) {
+            context.extensionSettings[MODULE_NAME][key] = defaultSettings[key];
+        }
+    }
+    settings = context.extensionSettings[MODULE_NAME];
+    return settings;
+}
+
+function saveSettings() {
+    SillyTavern.getContext().saveSettingsDebounced();
+}
+
 // ==========================================
 // SillyTavern Extension Lifecycle
 // ==========================================
 
-// Called when the extension is loaded
 jQuery(async () => {
+    const context = SillyTavern.getContext();
+    getSettings();
+
     const settingsHtml = `
         <div id="worldbuilder-settings">
             <div class="inline-drawer">
@@ -36,17 +66,25 @@ jQuery(async () => {
                 <div class="inline-drawer-content">
                     <p>Graph-based context injection for anti-OOC writing.</p>
                     <div class="flex-container">
-                        <input id="wb_url" type="text" class="text_pole" placeholder="API URL" value="${extensionSettings.worldbuilder_url}" />
+                        <input id="wb_url" type="text" class="text_pole" placeholder="API URL" value="${settings.worldbuilder_url}" />
                     </div>
                     <div class="flex-container">
-                        <input id="wb_project" type="text" class="text_pole" placeholder="Project ID (auto)" value="${extensionSettings.project_id}" />
+                        <input id="wb_project" type="text" class="text_pole" placeholder="Project ID (auto)" value="${settings.project_id}" />
                     </div>
                     <div class="flex-container">
                         <label>Hop Distance:</label>
-                        <input id="wb_hop" type="number" min="1" max="5" value="${extensionSettings.max_hop}" />
+                        <input id="wb_hop" type="number" min="1" max="5" value="${settings.max_hop}" />
                     </div>
                     <div class="flex-container">
-                        <input id="wb_enabled" type="checkbox" ${extensionSettings.enabled ? 'checked' : ''} />
+                        <label>Inject At:</label>
+                        <select id="wb_position" class="text_pole">
+                            <option value="before_char">Before first char message</option>
+                            <option value="after_char">After last char message</option>
+                            <option value="before_system">Before system prompt</option>
+                        </select>
+                    </div>
+                    <div class="flex-container">
+                        <input id="wb_enabled" type="checkbox" ${settings.enabled ? 'checked' : ''} />
                         <label for="wb_enabled">Enabled</label>
                     </div>
                     <hr>
@@ -57,17 +95,19 @@ jQuery(async () => {
     `;
 
     $('#extensions_settings').append(settingsHtml);
+    $('#wb_position').val(settings.injection_position);
 
     // Bind settings
-    $('#wb_url').on('input', () => { extensionSettings.worldbuilder_url = $('#wb_url').val(); saveSettings(); });
-    $('#wb_project').on('input', () => { extensionSettings.project_id = $('#wb_project').val(); saveSettings(); });
-    $('#wb_hop').on('input', () => { extensionSettings.max_hop = parseInt($('#wb_hop').val()) || 2; saveSettings(); });
-    $('#wb_enabled').on('change', () => { extensionSettings.enabled = $('#wb_enabled').is(':checked'); saveSettings(); });
+    $('#wb_url').on('input', () => { settings.worldbuilder_url = String($('#wb_url').val()); saveSettings(); });
+    $('#wb_project').on('input', () => { settings.project_id = String($('#wb_project').val()); saveSettings(); });
+    $('#wb_hop').on('input', () => { settings.max_hop = parseInt(String($('#wb_hop').val())) || 2; saveSettings(); });
+    $('#wb_position').on('change', () => { settings.injection_position = String($('#wb_position').val()); saveSettings(); });
+    $('#wb_enabled').on('change', () => { settings.enabled = $('#wb_enabled').is(':checked'); saveSettings(); });
 
-    // Register the prompt interceptor
-    SillyTavern.getContext().registerEvent('chatCompletionPromptReady', 0, onPromptReady);
+    // Register the prompt interceptor (correct ST event API).
+    context.eventSource.on(context.eventTypes.CHAT_COMPLETION_PROMPT_READY, onPromptReady);
 
-    console.log('WorldBuilder plugin loaded');
+    console.log('[WorldBuilder] plugin loaded');
     $('#wb_status').text('✅ Plugin loaded');
 });
 
@@ -77,84 +117,71 @@ jQuery(async () => {
 
 /**
  * Intercept the prompt before it's sent to the AI.
- * Extract character names from the conversation,
- * query WorldBuilder API for graph context,
- * and inject it into the system prompt.
+ * eventData = { chat: Array<{role, content}>, dryRun: boolean }
  */
-async function onPromptReady(promptData) {
-    if (!extensionSettings.enabled) return;
+async function onPromptReady(eventData) {
+    if (!settings.enabled) return;
+    if (eventData?.dryRun) return; // token-counting / preview pass — don't inject
 
     try {
-        // 1. Extract character names from the current conversation
-        const characterNames = extractCharacterNames(promptData);
+        const characterNames = extractCharacterNames(eventData);
 
         if (characterNames.length === 0) {
-            console.log('WorldBuilder: No characters detected in conversation');
+            console.log('[WorldBuilder] No characters detected in conversation');
             return;
         }
 
-        // 2. Auto-detect project ID if not set
-        let projectId = extensionSettings.project_id;
+        let projectId = settings.project_id;
         if (!projectId) {
             projectId = await autoDetectProject();
             if (!projectId) {
-                console.log('WorldBuilder: No project found');
+                console.log('[WorldBuilder] No project found');
                 return;
             }
         }
 
-        // 3. Query WorldBuilder Context API
         const context = await fetchGraphContext(projectId, characterNames);
 
         if (!context || !context.system_injection) {
-            console.log('WorldBuilder: No context returned');
+            console.log('[WorldBuilder] No context returned');
             return;
         }
 
-        // 4. Build injection text
         let injectionText = `\n[WorldBuilder 图谱上下文]\n${context.system_injection}\n[/WorldBuilder 图谱上下文]`;
 
-        // Add warnings if any
         if (context.active_warnings && context.active_warnings.length > 0) {
             injectionText += '\n[⚠️ 矛盾预警]\n' + context.active_warnings.map(w => `⚠️ ${w}`).join('\n') + '\n[/⚠️ 矛盾预警]';
         }
 
-        // 5. Inject into prompt
-        injectIntoPrompt(promptData, injectionText);
+        injectIntoPrompt(eventData, injectionText);
 
-        console.log(`WorldBuilder: Injected ${context.token_count} tokens of context for [${characterNames.join(', ')}]`);
+        console.log(`[WorldBuilder] Injected ${context.token_count} tokens of context for [${characterNames.join(', ')}]`);
         $('#wb_status').text(`✅ Injected context for: ${characterNames.join(', ')} (${context.token_count} tokens)`);
-
     } catch (error) {
-        console.error('WorldBuilder error:', error);
+        console.error('[WorldBuilder] error:', error);
         $('#wb_status').text(`❌ Error: ${error.message}`);
     }
 }
 
 /**
  * Extract character names from the conversation.
- * Strategy:
- * 1. Check the current character card name
- * 2. Check @mentions in the last few messages
- * 3. Check for character names from the chat history
+ * 1. Current character card name (context.name2)
+ * 2. @mentions in the last few messages of eventData.chat
  */
-function extractCharacterNames(promptData) {
+function extractCharacterNames(eventData) {
     const names = new Set();
     const context = SillyTavern.getContext();
 
-    // Current character
     const charName = context.name2 || context.characterId;
     if (charName) names.add(charName);
 
-    // Check messages for @mentions and character names
-    if (promptData.messages) {
-        // Take the last 5 messages for context
-        const recentMessages = promptData.messages.slice(-5);
+    const chat = eventData?.chat;
+    if (Array.isArray(chat)) {
+        const recentMessages = chat.slice(-5);
         for (const msg of recentMessages) {
-            if (!msg.content) continue;
-
-            // Look for @mentions
-            const mentions = msg.content.match(/@(\S+)/g);
+            const content = typeof msg?.content === 'string' ? msg.content : '';
+            if (!content) continue;
+            const mentions = content.match(/@(\S+)/g);
             if (mentions) {
                 mentions.forEach(m => names.add(m.slice(1)));
             }
@@ -169,23 +196,23 @@ function extractCharacterNames(promptData) {
  */
 async function autoDetectProject() {
     try {
-        const response = await fetch(`${extensionSettings.worldbuilder_url}/api/projects`);
+        const response = await fetch(`${settings.worldbuilder_url}/api/projects`);
         if (!response.ok) return null;
         const projects = await response.json();
-        if (projects.length > 0) {
-            extensionSettings.project_id = projects[0].id;
+        if (Array.isArray(projects) && projects.length > 0) {
+            settings.project_id = projects[0].id;
             $('#wb_project').val(projects[0].id);
+            saveSettings();
             return projects[0].id;
         }
     } catch (e) {
-        console.error('WorldBuilder: Failed to auto-detect project:', e);
+        console.error('[WorldBuilder] Failed to auto-detect project:', e);
     }
     return null;
 }
 
 /**
- * Fetch graph context from WorldBuilder API.
- * Uses the 2-hop graph distance query for precise context injection.
+ * Fetch graph context from WorldBuilder API (2-hop graph distance query).
  */
 async function fetchGraphContext(projectId, characterNames) {
     const params = new URLSearchParams({
@@ -193,7 +220,7 @@ async function fetchGraphContext(projectId, characterNames) {
     });
 
     const response = await fetch(
-        `${extensionSettings.worldbuilder_url}/api/projects/${projectId}/entities/context?${params}`
+        `${settings.worldbuilder_url}/api/projects/${projectId}/entities/context?${params}`,
     );
 
     if (!response.ok) {
@@ -204,53 +231,32 @@ async function fetchGraphContext(projectId, characterNames) {
 }
 
 /**
- * Inject the context text into the prompt at the configured position.
+ * Inject the context text into the chat array at the configured position.
+ * eventData.chat is the chat-completion messages array of { role, content }.
  */
-function injectIntoPrompt(promptData, injectionText) {
-    const position = extensionSettings.injection_position;
+function injectIntoPrompt(eventData, injectionText) {
+    const chat = eventData?.chat;
+    if (!Array.isArray(chat)) return;
+
+    const entry = { role: 'system', content: injectionText };
+    const position = settings.injection_position;
 
     if (position === 'before_system') {
-        // Add before the system prompt
-        if (promptData.system) {
-            promptData.system = injectionText + '\n\n' + promptData.system;
-        }
-    } else if (position === 'before_char') {
-        // Add before the first character message
-        if (promptData.messages && promptData.messages.length > 0) {
-            const firstCharIdx = promptData.messages.findIndex(m => m.role === 'assistant');
-            if (firstCharIdx >= 0) {
-                promptData.messages.splice(firstCharIdx, 0, {
-                    role: 'system',
-                    content: injectionText,
-                });
-            }
+        chat.unshift(entry);
+    } else if (position === 'after_char') {
+        const lastCharIdx = chat.findLastIndex(m => m.role === 'assistant');
+        if (lastCharIdx >= 0) {
+            chat.splice(lastCharIdx + 1, 0, entry);
+        } else {
+            chat.push(entry);
         }
     } else {
-        // after_char: Add after the last character message
-        if (promptData.messages && promptData.messages.length > 0) {
-            const lastCharIdx = promptData.messages.findLastIndex(m => m.role === 'assistant');
-            if (lastCharIdx >= 0) {
-                promptData.messages.splice(lastCharIdx + 1, 0, {
-                    role: 'system',
-                    content: injectionText,
-                });
-            }
+        // before_char (default): before the first assistant message
+        const firstCharIdx = chat.findIndex(m => m.role === 'assistant');
+        if (firstCharIdx >= 0) {
+            chat.splice(firstCharIdx, 0, entry);
+        } else {
+            chat.push(entry);
         }
     }
 }
-
-/**
- * Save settings to SillyTavern's extension storage.
- */
-function saveSettings() {
-    SillyTavern.getContext().extensionSettings.worldbuilder = extensionSettings;
-    saveMetadataDebounced();
-}
-
-// Load saved settings
-(function loadSettings() {
-    const saved = SillyTavern.getContext().extensionSettings.worldbuilder;
-    if (saved) {
-        Object.assign(extensionSettings, saved);
-    }
-})();

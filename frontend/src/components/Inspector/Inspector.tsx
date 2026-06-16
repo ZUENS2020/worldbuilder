@@ -1,24 +1,47 @@
 import { useState } from 'react';
 import { useAppStore } from '../../stores/appStore';
-import { ENTITY_CONFIG, RELATION_CONFIG } from '../../types';
+import { ENTITY_CONFIG, RELATION_CONFIG, TAG_COLORS, getRelationConfig } from '../../types';
 import type { EntityType, RelationType } from '../../types';
 import TextEditorModal from '../common/TextEditorModal';
+import Markdown from '../common/Markdown';
 
-// All available relation types for the add-relation form
-const ALL_RELATION_TYPES = Object.keys(RELATION_CONFIG) as RelationType[];
+// Built-in relation type keys
+const BUILTIN_RELATION_TYPES = Object.keys(RELATION_CONFIG) as RelationType[];
 
 export default function Inspector() {
-  const { selectedEntityId, entities, relations, updateEntity, removeEntity, executeTransform, addRelation, removeRelation, focusOnEntity } = useAppStore();
+  const {
+    selectedEntityId, entities, relations, updateEntity, removeEntity,
+    executeTransform, addRelation, removeRelation, focusOnEntity,
+    customRelationTypes, addCustomRelationType, removeCustomRelationType,
+  } = useAppStore();
+
   const [aiLoading, setAiLoading] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<string | null>(null);
+  // Long string fields render as Markdown by default; toggled here to edit inline.
+  const [inlineEditFields, setInlineEditFields] = useState<Set<string>>(new Set());
+  const toggleInlineEdit = (key: string) =>
+    setInlineEditFields((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
 
   // Add relation form state
   const [showAddRel, setShowAddRel] = useState(false);
   const [newRelTargetId, setNewRelTargetId] = useState('');
-  const [newRelType, setNewRelType] = useState<RelationType>('ally');
+  const [newRelType, setNewRelType] = useState<string>('ally');
   const [newRelDirection, setNewRelDirection] = useState<'outgoing' | 'incoming'>('outgoing');
   const [addingRel, setAddingRel] = useState(false);
+
+  // Custom type creation form (inside the add-relation form)
+  const [showCustomType, setShowCustomType] = useState(false);
+  const [customTypeName, setCustomTypeName] = useState('');
+  const [customTypeColor, setCustomTypeColor] = useState(TAG_COLORS[0]);
+  const [customTypeStyle, setCustomTypeStyle] = useState<'solid' | 'dashed' | 'dotted'>('solid');
+
+  // Merged config for rendering
+  const allRelConfig = getRelationConfig(customRelationTypes);
 
   const entity = entities.find((e) => e.id === selectedEntityId);
 
@@ -70,14 +93,20 @@ export default function Inspector() {
     setAddingRel(true);
     const sourceId = newRelDirection === 'outgoing' ? entity.id : newRelTargetId;
     const targetId = newRelDirection === 'outgoing' ? newRelTargetId : entity.id;
-    await addRelation({ source_id: sourceId, target_id: targetId, type: newRelType, weight: 0.5 });
+    await addRelation({ source_id: sourceId, target_id: targetId, type: newRelType as RelationType, weight: 0.5 });
     setShowAddRel(false);
     setNewRelTargetId('');
+    setShowCustomType(false);
     setAddingRel(false);
   };
 
-  const handleDeleteRelation = (relId: string) => {
-    removeRelation(relId);
+  const handleCreateCustomType = () => {
+    if (!customTypeName.trim()) return;
+    addCustomRelationType(customTypeName.trim(), customTypeColor, customTypeStyle);
+    // Set the new type as the selected type (id will be generated, use name for now)
+    // The newly added type's id will be available next render
+    setCustomTypeName('');
+    setShowCustomType(false);
   };
 
   // Other entities for the target dropdown (exclude self)
@@ -130,13 +159,13 @@ export default function Inspector() {
           {aiResult && (
             <div
               style={{
-                marginTop: 8, padding: '6px 8px', borderRadius: 4, fontSize: 11, whiteSpace: 'pre-wrap',
+                marginTop: 8, padding: '6px 8px', borderRadius: 4, fontSize: 11,
                 background: aiResult.startsWith('错误') ? '#fdecea' : '#eafaf0',
                 color: aiResult.startsWith('错误') ? '#c0392b' : '#1f7a3d',
                 border: `1px solid ${aiResult.startsWith('错误') ? '#f3c6c0' : '#bfe6cd'}`,
               }}
             >
-              {aiResult}
+              <Markdown style={{ fontSize: 11, color: 'inherit' }}>{aiResult}</Markdown>
             </div>
           )}
         </div>
@@ -155,21 +184,41 @@ export default function Inspector() {
             const isLong = isString && (value as string).length > 80;
             return (
               <div key={key} style={{ marginBottom: 7 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'space-between', marginBottom: 2 }}>
                   <span style={{ color: 'var(--mt-text-muted)', fontSize: 10 }}>{key}</span>
-                  {isString && (
-                    <button
-                      className="mt-btn"
-                      style={{ fontSize: 9, padding: '0 5px', height: 16, color: 'var(--mt-accent)' }}
-                      onClick={() => setEditingField(key)}
-                      title="放大编辑"
-                    >
-                      ⤢ 放大
-                    </button>
-                  )}
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {isLong && (
+                      <button
+                        className="mt-btn"
+                        style={{ fontSize: 9, padding: '0 5px', height: 16, color: 'var(--mt-text-muted)' }}
+                        onClick={() => toggleInlineEdit(key)}
+                        title={inlineEditFields.has(key) ? '完成编辑（显示渲染）' : '内联编辑源码'}
+                      >
+                        {inlineEditFields.has(key) ? '✓ 完成' : '✎ 编辑'}
+                      </button>
+                    )}
+                    {isString && (
+                      <button
+                        className="mt-btn"
+                        style={{ fontSize: 9, padding: '0 5px', height: 16, color: 'var(--mt-accent)' }}
+                        onClick={() => setEditingField(key)}
+                        title="放大编辑"
+                      >
+                        ⤢ 放大
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {isLong ? (
-                  <textarea value={value as string} onChange={(e) => handlePropertyChange(key, e.target.value)} rows={8} style={fieldStyle} />
+                  inlineEditFields.has(key) ? (
+                    <textarea value={value as string} onChange={(e) => handlePropertyChange(key, e.target.value)} rows={8} style={fieldStyle} />
+                  ) : (
+                    <Markdown
+                      style={{ fontSize: 12, lineHeight: 1.6, padding: '6px 8px', border: '1px solid var(--mt-border-soft)', borderRadius: 4, background: 'var(--mt-panel-header-2)' }}
+                    >
+                      {value as string}
+                    </Markdown>
+                  )
                 ) : (
                   <input value={String(value)} onChange={(e) => handlePropertyChange(key, e.target.value)} style={fieldStyle} />
                 )}
@@ -182,7 +231,7 @@ export default function Inspector() {
         <div style={{ padding: '10px 12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <span style={sectionLabel}>关系 Links ({entityRelations.length})</span>
-            <button className="mt-btn" onClick={() => { setShowAddRel(true); setNewRelTargetId(''); }} style={{ fontSize: 10, padding: '1px 6px', border: '1px solid var(--mt-border)' }}>＋ 添加</button>
+            <button className="mt-btn" onClick={() => { setShowAddRel(true); setNewRelTargetId(''); setShowCustomType(false); }} style={{ fontSize: 10, padding: '1px 6px', border: '1px solid var(--mt-border)' }}>＋ 添加</button>
           </div>
 
           {entityRelations.length === 0 && !showAddRel && (
@@ -193,14 +242,13 @@ export default function Inspector() {
             const isSource = r.source_id === entity.id;
             const other = entities.find((e) => e.id === (isSource ? r.target_id : r.source_id));
             const otherConfig = other ? ENTITY_CONFIG[other.type as EntityType] : null;
-            const relConfig = RELATION_CONFIG[r.type] || { color: '#888', label: r.type };
+            const relConfig = allRelConfig[r.type] || { color: '#888', label: r.type };
             return (
               <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0', fontSize: 12, borderBottom: '1px solid var(--mt-border-soft)' }}>
                 <span style={{ color: 'var(--mt-text-muted)', fontWeight: 700, fontSize: 11 }}>{isSource ? '→' : '←'}</span>
                 <span style={{ color: relConfig.color, fontSize: 10, background: `${relConfig.color}1e`, padding: '1px 6px', borderRadius: 3, border: `1px solid ${relConfig.color}40` }}>
                   {relConfig.label}
                 </span>
-                {/* Clickable entity name — focuses on the node in the graph */}
                 <span
                   onClick={() => focusOnEntity((isSource ? r.target_id : r.source_id))}
                   style={{
@@ -212,9 +260,8 @@ export default function Inspector() {
                   {otherConfig?.icon} {other?.name || '?'}
                 </span>
                 <span style={{ color: 'var(--mt-text-faint)', fontSize: 9 }}>{Math.round((r.weight ?? 0) * 100)}%</span>
-                {/* Delete relation button */}
                 <span
-                  onClick={() => handleDeleteRelation(r.id)}
+                  onClick={() => removeRelation(r.id)}
                   style={{ fontSize: 10, color: '#ccc', cursor: 'pointer', padding: '0 2px', flexShrink: 0 }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#c0392b'; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#ccc'; }}
@@ -253,15 +300,83 @@ export default function Inspector() {
                 <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 3 }}>关系类型</div>
                 <select
                   value={newRelType}
-                  onChange={(e) => setNewRelType(e.target.value as RelationType)}
+                  onChange={(e) => setNewRelType(e.target.value)}
                   style={{ ...fieldStyle, padding: '3px 6px' }}
                 >
-                  {ALL_RELATION_TYPES.map((rt) => {
-                    const rc = RELATION_CONFIG[rt];
-                    return <option key={rt} value={rt}>{rc.label} ({rt})</option>;
-                  })}
+                  <optgroup label="内置类型">
+                    {BUILTIN_RELATION_TYPES.map((rt) => {
+                      const rc = RELATION_CONFIG[rt];
+                      return <option key={rt} value={rt}>{rc.label}</option>;
+                    })}
+                  </optgroup>
+                  {customRelationTypes.length > 0 && (
+                    <optgroup label="自定义类型">
+                      {customRelationTypes.map((ct) => (
+                        <option key={ct.id} value={ct.id}>{ct.name}</option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
+                {/* Custom type creation toggle */}
+                <button
+                  className="mt-btn"
+                  onClick={() => setShowCustomType((v) => !v)}
+                  style={{ fontSize: 9, padding: '1px 6px', marginTop: 4, border: '1px solid var(--mt-border)', color: 'var(--mt-accent)' }}
+                >
+                  {showCustomType ? '▲ 收起' : '✏️ 自定义新类型...'}
+                </button>
               </div>
+
+              {/* Custom type creation form */}
+              {showCustomType && (
+                <div style={{
+                  padding: 6, marginBottom: 6, borderRadius: 3,
+                  border: '1px dashed var(--mt-accent)', background: '#fff',
+                }}>
+                  <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 4, fontWeight: 600 }}>新建自定义关系类型</div>
+                  <input
+                    value={customTypeName}
+                    onChange={(e) => setCustomTypeName(e.target.value)}
+                    placeholder="类型名称（如：师承）"
+                    style={{ ...fieldStyle, marginBottom: 4, padding: '3px 6px', fontSize: 11 }}
+                  />
+                  {/* Color selection */}
+                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 4 }}>
+                    {TAG_COLORS.map((c) => (
+                      <span
+                        key={c}
+                        onClick={() => setCustomTypeColor(c)}
+                        style={{
+                          width: 16, height: 16, borderRadius: '50%', background: c,
+                          border: customTypeColor === c ? '2px solid #333' : '2px solid #fff',
+                          cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+                        }}
+                      />
+                    ))}
+                  </div>
+                  {/* Line style */}
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                    {(['solid', 'dashed', 'dotted'] as const).map((s) => (
+                      <button
+                        key={s}
+                        className={`mt-btn${customTypeStyle === s ? ' active' : ''}`}
+                        onClick={() => setCustomTypeStyle(s)}
+                        style={{ fontSize: 9, padding: '2px 6px', border: `1px solid ${customTypeStyle === s ? 'var(--mt-accent)' : 'var(--mt-border)'}` }}
+                      >
+                        {s === 'solid' ? '━━ 实线' : s === 'dashed' ? '┅┅ 虚线' : '···· 点线'}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="mt-btn active"
+                    onClick={handleCreateCustomType}
+                    disabled={!customTypeName.trim()}
+                    style={{ fontSize: 10, padding: '2px 8px', border: '1px solid var(--mt-accent)', fontWeight: 600 }}
+                  >
+                    创建并选用
+                  </button>
+                </div>
+              )}
 
               {/* Direction */}
               <div style={{ marginBottom: 8 }}>
@@ -296,12 +411,37 @@ export default function Inspector() {
                 </button>
                 <button
                   className="mt-btn"
-                  onClick={() => setShowAddRel(false)}
+                  onClick={() => { setShowAddRel(false); setShowCustomType(false); }}
                   style={{ fontSize: 11, border: '1px solid var(--mt-border)' }}
                 >
                   取消
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Custom relation types management */}
+          {customRelationTypes.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={sectionLabel}>自定义关系类型</div>
+              {customRelationTypes.map((ct) => (
+                <div key={ct.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 11 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: ct.color, flexShrink: 0 }} />
+                  <span style={{ flex: 1 }}>{ct.name}</span>
+                  <span style={{ fontSize: 9, color: 'var(--mt-text-faint)' }}>
+                    {ct.style === 'solid' ? '实线' : ct.style === 'dashed' ? '虚线' : '点线'}
+                  </span>
+                  <span
+                    onClick={() => removeCustomRelationType(ct.id)}
+                    style={{ fontSize: 10, color: '#ccc', cursor: 'pointer' }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#c0392b'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#ccc'; }}
+                    title="删除自定义类型"
+                  >
+                    ✕
+                  </span>
+                </div>
+              ))}
             </div>
           )}
         </div>

@@ -23,7 +23,7 @@ import RelationPicker from './RelationPicker';
 import ContextMenu from '../ContextMenu/ContextMenu';
 import { DND_MIME } from '../Palette/Palette';
 import { useAppStore } from '../../stores/appStore';
-import { ENTITY_CONFIG, RELATION_CONFIG } from '../../types';
+import { ENTITY_CONFIG, getRelationConfig } from '../../types';
 import type { Entity, Relation, EntityType } from '../../types';
 import { calculateLayout } from '../../utils/layout';
 
@@ -39,6 +39,7 @@ function buildGraphData(
   relations: Relation[],
   existingPositions?: Map<string, { x: number; y: number }>,
   relationFilter?: string,
+  customRelationTypes?: import('../../types').CustomRelationType[],
 ) {
   const filteredRelations = relationFilter
     ? relations.filter((r) => r.type === relationFilter)
@@ -49,6 +50,7 @@ function buildGraphData(
     : new Set(entities.map((e) => e.id));
 
   const visibleEntities = entities.filter((e) => visibleEntityIds.has(e.id));
+  const allRelConfig = getRelationConfig(customRelationTypes);
 
   const nodes: Node[] = visibleEntities.map((entity, i) => {
     const existing = existingPositions?.get(entity.id);
@@ -63,7 +65,7 @@ function buildGraphData(
   });
 
   const edges: Edge[] = filteredRelations.map((relation) => {
-    const config = RELATION_CONFIG[relation.type] || { color: '#888', style: 'solid', label: relation.type };
+    const config = allRelConfig[relation.type] || { color: '#888', style: 'solid', label: relation.type };
     return {
       id: relation.id,
       source: relation.source_id,
@@ -85,6 +87,7 @@ export default function Canvas() {
     project, selectedEntityId,
     layoutNonce, setLayouting,
     focusEntityId, focusNonce,
+    customRelationTypes,
   } = useAppStore();
   const rf = useReactFlow();
 
@@ -118,7 +121,7 @@ export default function Canvas() {
   }, []);
 
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
-    () => buildGraphData(entities, relations, nodePositions.current, relationFilter),
+    () => buildGraphData(entities, relations, nodePositions.current, relationFilter, customRelationTypes),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
@@ -307,6 +310,8 @@ export default function Canvas() {
     [project, rf, addEntity, setSelectedEntity]
   );
 
+  const allRelConfig = getRelationConfig(customRelationTypes);
+
   const relationTypes = useMemo(() => {
     const types = new Set<string>();
     relations.forEach((r) => types.add(r.type));
@@ -375,7 +380,7 @@ export default function Canvas() {
                 <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>│ 人物</span>
               )}
               {CHAR_LINK_TYPES.filter(t => relationTypes.includes(t)).map((rt) => {
-                const config = RELATION_CONFIG[rt] || { color: '#888', label: rt };
+                const config = allRelConfig[rt] || { color: '#888', label: rt };
                 const on = relationFilter === rt;
                 return (
                   <button
@@ -399,7 +404,7 @@ export default function Canvas() {
                 <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>│ 关联</span>
               )}
               {ASSOC_LINK_TYPES.filter(t => relationTypes.includes(t)).map((rt) => {
-                const config = RELATION_CONFIG[rt] || { color: '#888', label: rt };
+                const config = allRelConfig[rt] || { color: '#888', label: rt };
                 const on = relationFilter === rt;
                 return (
                   <button
@@ -433,6 +438,30 @@ export default function Canvas() {
                   >
                     📍 位置
                   </button>
+                </>
+              )}
+              {/* Group 4: Custom relation types */}
+              {customRelationTypes.filter(ct => relationTypes.includes(ct.id)).length > 0 && (
+                <>
+                  <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>│ 自定义</span>
+                  {customRelationTypes.filter(ct => relationTypes.includes(ct.id)).map((ct) => {
+                    const on = relationFilter === ct.id;
+                    return (
+                      <button
+                        key={ct.id}
+                        onClick={() => setRelationFilter(on ? undefined : ct.id)}
+                        className="mt-btn"
+                        style={{
+                          fontSize: 10, padding: '2px 7px',
+                          border: `1px solid ${on ? ct.color : 'var(--mt-border)'}`,
+                          background: on ? `${ct.color}22` : 'transparent',
+                          color: on ? ct.color : 'var(--mt-text)',
+                        }}
+                      >
+                        {ct.name}
+                      </button>
+                    );
+                  })}
                 </>
               )}
             </div>

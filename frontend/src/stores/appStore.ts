@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Entity, Relation, Project, TransformDef, TransformResult, Tag } from '../types';
+import type { Entity, Relation, Project, TransformDef, TransformResult, Tag, CustomRelationType } from '../types';
 import { api } from '../services/api';
 
 interface AICandidate {
@@ -26,7 +26,11 @@ interface Document {
 interface AppState {
   // Project
   project: Project | null;
+  projects: Project[];
   setProject: (p: Project | null) => void;
+  loadProjects: () => Promise<void>;
+  switchProject: (id: string) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
 
   // Entities & Relations
   entities: Entity[];
@@ -102,11 +106,59 @@ interface AppState {
   renameTag: (id: string, name: string) => void;
   addEntityToTag: (entityId: string, tagId: string) => void;
   removeEntityFromTag: (entityId: string, tagId: string) => void;
+
+  // Custom relation types (user-defined, persisted in Project.settings)
+  customRelationTypes: CustomRelationType[];
+  addCustomRelationType: (name: string, color: string, style: 'solid' | 'dashed' | 'dotted') => void;
+  removeCustomRelationType: (id: string) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
   project: null,
+  projects: [],
   setProject: (p) => set({ project: p }),
+
+  loadProjects: async () => {
+    try {
+      const projects = await api.listProjects();
+      set({ projects });
+    } catch (e) {
+      console.error('Failed to load projects:', e);
+    }
+  },
+
+  switchProject: async (id) => {
+    // Reset selection/focus state before loading new project
+    set({
+      selectedEntityId: null,
+      focusEntityId: null,
+      focusNonce: 0,
+      contextMenu: null,
+      aiCandidates: [],
+      documents: [],
+    });
+    await get().loadProjectData(id);
+    // Also refresh the project list to keep it in sync
+    await get().loadProjects();
+  },
+
+  deleteProject: async (id) => {
+    try {
+      await api.deleteProject(id);
+      const remaining = get().projects.filter((p) => p.id !== id);
+      set({ projects: remaining });
+      // If we deleted the current project, switch to another or go to list
+      if (get().project?.id === id) {
+        if (remaining.length > 0) {
+          await get().switchProject(remaining[0].id);
+        } else {
+          set({ project: null, entities: [], relations: [], tags: [], customRelationTypes: [], documents: [] });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to delete project:', e);
+    }
+  },
 
   entities: [],
   relations: [],
@@ -120,7 +172,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         api.listRelations(projectId),
       ]);
       const tags: Tag[] = Array.isArray(project?.settings?.tags) ? project.settings.tags : [];
-      set({ project, entities, relations, tags, loading: false });
+      const customRelationTypes: CustomRelationType[] = Array.isArray(project?.settings?.customRelationTypes) ? project.settings.customRelationTypes : [];
+      set({ project, entities, relations, tags, customRelationTypes, loading: false });
     } catch (e) {
       console.error('Failed to load project:', e);
       set({ loading: false });
@@ -359,6 +412,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { tags };
     });
   },
+
+  // ── Custom relation types ──
+  customRelationTypes: [],
+
+  addCustomRelationType: (name, color, style) => {
+    const id = `crt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const newType: CustomRelationType = { id, name, color, style };
+    set((s) => {
+      const customRelationTypes = [...s.customRelationTypes, newType];
+      _persistCustomRelationTypes(customRelationTypes, s.project);
+      return { customRelationTypes };
+    });
+  },
+
+  removeCustomRelationType: (id) => {
+    set((s) => {
+      const customRelationTypes = s.customRelationTypes.filter((t) => t.id !== id);
+      _persistCustomRelationTypes(customRelationTypes, s.project);
+      return { customRelationTypes };
+    });
+  },
 }));
 
 /** Persist tags into Project.settings.tags and sync to backend. */
@@ -368,5 +442,14 @@ function _persistTags(tags: Tag[], project: Project | null) {
   // Fire-and-forget backend sync
   api.updateProject(project.id, { settings: project.settings }).catch((e) =>
     console.error('Failed to persist tags:', e)
+  );
+}
+
+/** Persist customRelationTypes into Project.settings and sync to backend. */
+function _persistCustomRelationTypes(customRelationTypes: CustomRelationType[], project: Project | null) {
+  if (!project) return;
+  project.settings = { ...project.settings, customRelationTypes };
+  api.updateProject(project.id, { settings: project.settings }).catch((e) =>
+    console.error('Failed to persist custom relation types:', e)
   );
 }

@@ -13,7 +13,7 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
 export default function Toolbar() {
   const rf = useReactFlow();
   const {
-    requestAutoLayout, layouting, setCreateOpen, tidyUp,
+    layouting, setCreateOpen, tidyUp,
   } = useAppStore();
 
   return (

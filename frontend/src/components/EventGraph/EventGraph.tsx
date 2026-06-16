@@ -33,7 +33,7 @@ import EntityNode from '../Canvas/EntityNode';
 import RelationEdge from '../Canvas/RelationEdge';
 import ContextMenu from '../ContextMenu/ContextMenu';
 import { useAppStore } from '../../stores/appStore';
-import { ENTITY_CONFIG, RELATION_CONFIG } from '../../types';
+import { ENTITY_CONFIG, getRelationConfig } from '../../types';
 import type { Entity, Relation } from '../../types';
 import { calculateLayout } from '../../utils/layout';
 
@@ -46,7 +46,10 @@ function buildEventData(
   entities: Entity[],
   relations: Relation[],
   existingPositions?: Map<string, { x: number; y: number }>,
+  customRelationTypes?: import('../../types').CustomRelationType[],
 ) {
+  const allRelConfig = getRelationConfig(customRelationTypes);
+
   // Project: only event entities
   const eventEntities = entities.filter((e) => e.type === 'event');
   const eventIds = new Set(eventEntities.map((e) => e.id));
@@ -68,7 +71,7 @@ function buildEventData(
   });
 
   const edges: Edge[] = eventRelations.map((relation) => {
-    const config = RELATION_CONFIG[relation.type] || { color: '#888', style: 'solid', label: relation.type };
+    const config = allRelConfig[relation.type] || { color: '#888', style: 'solid', label: relation.type };
     return {
       id: relation.id,
       source: relation.source_id,
@@ -86,7 +89,7 @@ function buildEventData(
 export default function EventGraph() {
   const {
     entities, relations, addRelation, setSelectedEntity, setContextMenu,
-    project,
+    project, customRelationTypes,
   } = useAppStore();
   const rf = useReactFlow();
 
@@ -94,7 +97,7 @@ export default function EventGraph() {
   const [layoutApplied, setLayoutApplied] = useState(false);
 
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
-    () => buildEventData(entities, relations, nodePositions.current),
+    () => buildEventData(entities, relations, nodePositions.current, customRelationTypes),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -108,10 +111,10 @@ export default function EventGraph() {
     prevRef.current = { entities, relations };
     setNodes((current) => {
       current.forEach((n) => nodePositions.current.set(n.id, n.position));
-      const { nodes: newNodes } = buildEventData(entities, relations, nodePositions.current);
+      const { nodes: newNodes } = buildEventData(entities, relations, nodePositions.current, customRelationTypes);
       return newNodes;
     });
-    const { edges: newEdges } = buildEventData(entities, relations, nodePositions.current);
+    const { edges: newEdges } = buildEventData(entities, relations, nodePositions.current, customRelationTypes);
     setEdges(newEdges);
     setLayoutApplied(false);
   }

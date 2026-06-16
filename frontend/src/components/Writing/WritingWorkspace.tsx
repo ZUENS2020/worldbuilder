@@ -6,8 +6,8 @@
  */
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import Markdown from '../common/Markdown';
+import { useTextHistory } from '../../hooks/useTextHistory';
 import { useAppStore } from '../../stores/appStore';
 import { api } from '../../services/api';
 import { ENTITY_CONFIG } from '../../types';
@@ -22,7 +22,8 @@ export default function WritingWorkspace() {
   const [editView, setEditView] = useState<ViewMode>('split');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [sceneDesc, setSceneDesc] = useState('');
-  const [generated, setGenerated] = useState('');
+  const gen = useTextHistory('');
+  const generated = gen.value;
   const [streaming, setStreaming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showDocs, setShowDocs] = useState(true);
@@ -59,7 +60,8 @@ export default function WritingWorkspace() {
   const handleGenerate = useCallback(async () => {
     if (!project || selectedIds.length === 0) return;
     setStreaming(true);
-    setGenerated('');
+    setViewingDocId(null);
+    gen.reset('');
     genRef.current = '';
 
     try {
@@ -75,14 +77,16 @@ export default function WritingWorkspace() {
         },
         (chunk) => {
           genRef.current += chunk;
-          setGenerated(genRef.current);
+          // Don't record each token — commit one history step when done.
+          gen.set(genRef.current, { record: false });
         },
       );
+      gen.commit();
     } catch (e: any) {
-      setGenerated(`**错误**: ${e.message}`);
+      gen.reset(`**错误**: ${e.message}`);
     }
     setStreaming(false);
-  }, [project, selectedIds, mode, sceneDesc, entities]);
+  }, [project, selectedIds, mode, sceneDesc, entities, gen]);
 
   const handleSave = async () => {
     if (!project || !generated) return;
@@ -97,7 +101,7 @@ export default function WritingWorkspace() {
       refs: { entity_ids: selectedIds },
     });
     setSaving(false);
-    setGenerated('');
+    gen.reset('');
   };
 
   // Saved documents
@@ -166,6 +170,28 @@ export default function WritingWorkspace() {
         </button>
 
         <div style={{ flex: 1 }} />
+
+        {/* Undo / redo */}
+        <button
+          className="mt-btn"
+          onClick={gen.undo}
+          disabled={!gen.canUndo}
+          title="撤销 (⌘/Ctrl+Z)"
+          style={{ fontSize: 13, padding: '3px 8px', border: '1px solid var(--mt-border)' }}
+        >
+          ↶
+        </button>
+        <button
+          className="mt-btn"
+          onClick={gen.redo}
+          disabled={!gen.canRedo}
+          title="重做 (⌘/Ctrl+Shift+Z)"
+          style={{ fontSize: 13, padding: '3px 8px', border: '1px solid var(--mt-border)' }}
+        >
+          ↷
+        </button>
+
+        <div style={{ width: 1, height: 18, background: 'var(--mt-border-soft)' }} />
 
         {/* Edit/Preview/Split toggle */}
         <div style={{ display: 'flex', gap: 0, border: '1px solid var(--mt-border)', borderRadius: 4, overflow: 'hidden' }}>
@@ -356,7 +382,8 @@ export default function WritingWorkspace() {
                   )}
                   <textarea
                     value={generated}
-                    onChange={(e) => setGenerated(e.target.value)}
+                    onChange={(e) => gen.set(e.target.value)}
+                    onKeyDown={gen.onKeyDown}
                     readOnly={!!viewingDoc}
                     style={{
                       flex: 1, resize: 'none', border: 'none', outline: 'none',
@@ -385,11 +412,7 @@ export default function WritingWorkspace() {
                     </div>
                   )}
                   <div style={{ flex: 1, overflowY: 'auto', padding: 24, background: '#fff' }}>
-                    <div className="md-body">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {displayContent || ''}
-                      </ReactMarkdown>
-                    </div>
+                    <Markdown>{displayContent}</Markdown>
                   </div>
                 </div>
               )}
@@ -418,10 +441,10 @@ export default function WritingWorkspace() {
                   onClick={() => {
                     if (viewingDocId === doc.id) {
                       setViewingDocId(null);
-                      setGenerated('');
+                      gen.reset('');
                     } else {
                       setViewingDocId(doc.id);
-                      setGenerated(doc.content);
+                      gen.reset(doc.content);
                     }
                   }}
                   style={{
@@ -438,11 +461,11 @@ export default function WritingWorkspace() {
                     {doc.content.length} 字
                   </div>
                   {/* Mini MD preview */}
-                  <div className="md-body" style={{ fontSize: 10, color: 'var(--mt-text-muted)', maxHeight: 60, overflow: 'hidden', marginTop: 4, lineHeight: 1.4 }}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {doc.content.slice(0, 200)}
-                    </ReactMarkdown>
-                  </div>
+                  <Markdown
+                    style={{ fontSize: 10, color: 'var(--mt-text-muted)', maxHeight: 60, overflow: 'hidden', marginTop: 4, lineHeight: 1.4 }}
+                  >
+                    {doc.content.slice(0, 200)}
+                  </Markdown>
                 </div>
               ))}
               {savedDocs.length === 0 && (
@@ -468,7 +491,7 @@ export default function WritingWorkspace() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               className="mt-btn"
-              onClick={() => { setGenerated(''); setViewingDocId(null); }}
+              onClick={() => { gen.reset(''); setViewingDocId(null); }}
               style={{ fontSize: 11, padding: '4px 12px', border: '1px solid var(--mt-border)' }}
             >
               清空

@@ -1,22 +1,13 @@
 import { memo } from 'react';
 import { BaseEdge, getStraightPath, type EdgeProps } from '@xyflow/react';
-import { RELATION_CONFIG } from '../../types';
+import { getRelationConfig } from '../../types';
+import { useAppStore } from '../../stores/appStore';
 
 /**
  * OSINT-style edge, optimized for character-driven narrative.
  *
- * Visual hierarchy:
- *   - character ↔ character: thick, coloured, label always shown
- *   - character ↔ faction: medium, muted colour
- *   - character ↔ event/location: thin, dotted, label on hover only
- *
- * Relation types use distinct visual language:
- *   - rival/enemy: dashed red
- *   - ally/family: solid green/orange
- *   - mentor: solid cyan with arrow indicator
- *   - participated: thin dotted (event link)
- *   - member_of: medium solid (faction link)
- *   - located_at: faintest, barely visible (infrastructure)
+ * Uses getRelationConfig() to merge built-in + custom relation types
+ * so that user-defined types render with their chosen color/style/label.
  */
 function RelationEdge({
   id,
@@ -27,8 +18,10 @@ function RelationEdge({
   data,
   selected,
 }: EdgeProps) {
+  const customRelationTypes = useAppStore((s) => s.customRelationTypes);
   const relType = data?.relationType as string || 'ally';
-  const config = RELATION_CONFIG[relType] || { color: '#666', style: 'solid', label: relType };
+  const allConfig = getRelationConfig(customRelationTypes);
+  const config = allConfig[relType] || { color: '#666', style: 'solid', label: relType };
 
   // Determine edge category by the types of connected nodes
   // (We use a heuristic: "member_of" and "located_at" are infrastructure links)

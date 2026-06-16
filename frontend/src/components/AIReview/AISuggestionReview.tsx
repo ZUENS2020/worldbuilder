@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAppStore } from '../../stores/appStore';
-import { ENTITY_CONFIG, RELATION_CONFIG } from '../../types';
+import { ENTITY_CONFIG, getRelationConfig } from '../../types';
 import type { EntityType } from '../../types';
 
 interface Candidate {
@@ -23,6 +23,8 @@ export default function AISuggestionReview({ candidates, onAccept, onDismiss }: 
   const [selected, setSelected] = useState<Set<number>>(new Set(candidates.map((_, i) => i)));
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [edits, setEdits] = useState<Record<number, Partial<Candidate>>>({});
+  const customRelationTypes = useAppStore((s) => s.customRelationTypes);
+  const allRelConfig = getRelationConfig(customRelationTypes);
 
   const toggle = (idx: number) => {
     setSelected((prev) => {
@@ -85,7 +87,7 @@ export default function AISuggestionReview({ candidates, onAccept, onDismiss }: 
           {candidates.map((c, idx) => {
             const edited = getCandidate(idx);
             const entityConfig = ENTITY_CONFIG[edited.target_type as EntityType] || ENTITY_CONFIG.character;
-            const relConfig = RELATION_CONFIG[edited.relation_type] || { color: '#888', label: edited.relation_type };
+            const relConfig = allRelConfig[edited.relation_type] || { color: '#888', label: edited.relation_type };
             const isEditing = editingIdx === idx;
             const isChecked = selected.has(idx);
 
@@ -124,7 +126,7 @@ export default function AISuggestionReview({ candidates, onAccept, onDismiss }: 
                           background: 'var(--mt-window)', border: '1px solid var(--mt-border)',
                           borderRadius: 3, color: 'var(--mt-text)' }}
                       >
-                        {Object.entries(RELATION_CONFIG).map(([k, v]) => (
+                        {Object.entries(allRelConfig).map(([k, v]) => (
                           <option key={k} value={k}>{v.label}</option>
                         ))}
                       </select>

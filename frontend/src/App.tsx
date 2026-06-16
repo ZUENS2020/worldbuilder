@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { useAppStore } from './stores/appStore';
 import { api } from './services/api';
@@ -11,16 +11,20 @@ import EventGraph from './components/EventGraph/EventGraph';
 import WritingWorkspace from './components/Writing/WritingWorkspace';
 import AISuggestionReview from './components/AIReview/AISuggestionReview';
 import SettingsDialog from './components/Settings/SettingsDialog';
+import ProjectSwitcher from './components/ProjectSwitcher/ProjectSwitcher';
 
 function App() {
   const {
-    project, setProject, loadProjectData, entities, relations,
+    project, setProject, loadProjectData, loadProjects, switchProject, deleteProject,
+    projects, entities, relations,
     aiCandidates, setAiCandidates, acceptCandidates,
     viewMode, setViewMode, setSettingsOpen,
   } = useAppStore();
   const [projectInput, setProjectInput] = useState('');
   const [creating, setCreating] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
+  const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
+  const statusBarRef = useRef<HTMLSpanElement>(null);
   const [inspectorWidth, setInspectorWidth] = useState(() => {
     const saved = Number(localStorage.getItem('wb.inspectorWidth'));
     return saved >= 320 && saved <= 720 ? saved : 420;
@@ -50,10 +54,12 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const projects = await api.listProjects();
-        if (projects.length > 0) {
-          setProject(projects[0]);
-          await loadProjectData(projects[0].id);
+        const projectList = await api.listProjects();
+        // Store projects in state
+        useAppStore.setState({ projects: projectList });
+        if (projectList.length > 0) {
+          setProject(projectList[0]);
+          await loadProjectData(projectList[0].id);
         }
       } catch (e) {
         console.error('Failed to load projects:', e);
@@ -66,8 +72,8 @@ function App() {
     setCreating(true);
     try {
       const p = await api.createProject({ name: projectInput.trim(), description: '' });
-      setProject(p);
-      await loadProjectData(p.id);
+      await loadProjects();
+      await switchProject(p.id);
       setProjectInput('');
     } catch (e) {
       console.error('Failed to create project:', e);
@@ -75,15 +81,22 @@ function App() {
     setCreating(false);
   };
 
-  // --- Project setup screen ---
+  const handleDeleteProject = async (id: string, name: string) => {
+    if (!confirm(`确定删除项目「${name}」？所有实体、关系和文档将被永久删除。`)) return;
+    await deleteProject(id);
+  };
+
+  // --- Project setup screen (no project loaded) ---
   if (!project) {
     return (
-      <div style={{ width: '100vw', height: '100vh', background: 'var(--mt-window)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--mt-text)' }}>
-        <div style={{ textAlign: 'center', background: 'var(--mt-panel)', border: '1px solid var(--mt-border)', borderRadius: 8, padding: 40, boxShadow: '0 4px 24px rgba(0,0,0,0.12)' }}>
+      <div style={{ width: '100vw', height: '100vh', background: 'var(--mt-window)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--mt-text)' }}>
+        <div style={{ textAlign: 'center', background: 'var(--mt-panel)', border: '1px solid var(--mt-border)', borderRadius: 8, padding: 40, boxShadow: '0 4px 24px rgba(0,0,0,0.12)', width: 'min(520px, 90vw)' }}>
           <div style={{ fontSize: 44, marginBottom: 12 }}>🌐</div>
           <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6, color: 'var(--mt-accent-dark)' }}>WorldBuilder</h1>
           <p style={{ color: 'var(--mt-text-muted)', fontSize: 13, marginBottom: 22 }}>写小说就像在做一次情报调查</p>
-          <div style={{ display: 'flex', gap: 8 }}>
+
+          {/* Create new project */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20, justifyContent: 'center' }}>
             <input
               value={projectInput}
               onChange={(e) => setProjectInput(e.target.value)}
@@ -101,6 +114,49 @@ function App() {
               创建项目
             </button>
           </div>
+
+          {/* Existing projects list */}
+          {projects.length > 0 && (
+            <div style={{ borderTop: '1px solid var(--mt-border)', paddingTop: 16 }}>
+              <div style={{ fontSize: 12, color: 'var(--mt-text-muted)', marginBottom: 10, fontWeight: 600 }}>已有项目</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+                {projects.map((p) => (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '8px 12px', borderRadius: 4,
+                      border: '1px solid var(--mt-border)',
+                      background: 'var(--mt-window)',
+                    }}
+                  >
+                    <span style={{ fontSize: 16 }}>📁</span>
+                    <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--mt-text-faint)' }}>
+                        {p.description || '无描述'} · {p.updated_at ? new Date(p.updated_at).toLocaleDateString('zh-CN') : ''}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => switchProject(p.id)}
+                      className="mt-btn active"
+                      style={{ fontSize: 11, padding: '4px 12px', fontWeight: 600, border: '1px solid var(--mt-accent)', whiteSpace: 'nowrap' }}
+                    >
+                      打开
+                    </button>
+                    <button
+                      onClick={() => handleDeleteProject(p.id, p.name)}
+                      className="mt-btn"
+                      style={{ fontSize: 11, padding: '4px 6px', border: '1px solid var(--mt-border)', color: '#c0392b' }}
+                      title="删除项目"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -185,7 +241,16 @@ function App() {
 
         {/* Status bar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '3px 12px', borderTop: '1px solid var(--mt-border)', background: 'linear-gradient(var(--mt-panel-header-2), var(--mt-panel-header))', fontSize: 11, color: 'var(--mt-text-muted)' }}>
-          <span>📁 {project.name}</span>
+          <span
+            ref={statusBarRef}
+            onClick={() => setProjectSwitcherOpen((v) => !v)}
+            style={{ cursor: 'pointer', borderRadius: 3, padding: '1px 6px', transition: 'background 0.1s' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--mt-accent-bg)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; }}
+            title="点击切换项目"
+          >
+            📁 {project.name} ▾
+          </span>
           <span>●&nbsp;{entities.length} 实体</span>
           <span>🔗 {relations.length} 关系</span>
           <span style={{ marginLeft: 'auto', color: 'var(--mt-text-faint)' }}>右键节点运行 Transform · 拖拽调色盘到画布创建实体</span>
@@ -203,6 +268,11 @@ function App() {
       <SettingsDialog
         open={useAppStore.getState().settingsOpen}
         onClose={() => setSettingsOpen(false)}
+      />
+      <ProjectSwitcher
+        open={projectSwitcherOpen}
+        onClose={() => setProjectSwitcherOpen(false)}
+        anchorRect={statusBarRef.current?.getBoundingClientRect()}
       />
     </ReactFlowProvider>
   );

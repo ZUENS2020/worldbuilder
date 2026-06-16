@@ -54,6 +54,8 @@ export const api = {
   getProject: (id: string) => request<any>(`/projects/${id}`),
   updateProject: (id: string, data: any) =>
     request<any>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteProject: (id: string) =>
+    request(`/projects/${id}`, { method: 'DELETE' }),
 
   // Entities
   listEntities: (projectId: string) => request<any[]>(`/projects/${projectId}/entities`),
