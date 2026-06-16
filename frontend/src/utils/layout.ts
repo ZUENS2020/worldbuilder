@@ -249,19 +249,30 @@ export function radialLayout(nodes: Node[], edges: Edge[], focusId?: string): No
   }
 
   // For ring-2+ non-character nodes not yet assigned: place near their parent
+  // Faction nodes go to ring 2, events/locations to ring 3 — different rings avoid overlap
   for (const n of nodes) {
     if (angle.has(n.id)) continue;
     const p = parent.get(n.id);
     if (p && angle.has(p)) {
-      // Spread siblings evenly around the parent's angle
+      // Collect siblings that share the same parent and aren't yet assigned
       const siblings = nodes.filter((s) => parent.get(s.id) === p && !angle.has(s.id));
       const idx = siblings.indexOf(n);
       const base = angle.get(p)!;
-      const spread = 0.4; // radians
+      // Spread angle proportional to sibling count: at least 0.5 rad per sibling
+      const perSibling = Math.max(0.25, Math.PI / Math.max(siblings.length, 1));
+      const totalSpread = perSibling * siblings.length;
       const offset = siblings.length > 1
-        ? -spread / 2 + (spread * idx) / (siblings.length - 1)
+        ? -totalSpread / 2 + (totalSpread * idx) / (siblings.length - 1)
         : 0;
       angle.set(n.id, base + offset);
+
+      // Factions on ring 2, events/locations on ring 3
+      const nType = typeOf.get(n.id);
+      if (nType === 'faction') {
+        level.set(n.id, Math.max(level.get(n.id) ?? 2, 2));
+      } else if (nType === 'event' || nType === 'location') {
+        level.set(n.id, Math.max(level.get(n.id) ?? 2, 3));
+      }
     } else {
       // Fallback: even distribution
       const unassigned = nodes.filter((s) => !angle.has(s.id));
@@ -297,7 +308,7 @@ export function radialLayout(nodes: Node[], edges: Edge[], focusId?: string): No
  * push them apart along the line connecting them. Runs a few passes.
  */
 function resolveOverlaps(nodes: Node[], passes = 8): Node[] {
-  const MIN_GAP = 130; // minimum centre-to-centre distance
+  const MIN_GAP = 150; // minimum centre-to-centre distance (node + label pill)
   const result = nodes.map((n) => ({ ...n, position: { ...n.position } }));
 
   for (let pass = 0; pass < passes; pass++) {
