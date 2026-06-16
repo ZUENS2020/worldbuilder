@@ -46,6 +46,11 @@ interface AppState {
   selectedEntityId: string | null;
   setSelectedEntity: (id: string | null) => void;
 
+  // Focus (highlight + fitView to a node in the graph)
+  focusEntityId: string | null;
+  focusNonce: number;
+  focusOnEntity: (id: string) => void;
+
   // Context menu
   contextMenu: { x: number; y: number; entityId: string } | null;
   setContextMenu: (menu: { x: number; y: number; entityId: string } | null) => void;
@@ -165,6 +170,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   selectedEntityId: null,
   setSelectedEntity: (id) => set({ selectedEntityId: id }),
+
+  focusEntityId: null,
+  focusNonce: 0,
+  focusOnEntity: (id) => set((s) => ({
+    selectedEntityId: id,
+    focusEntityId: id,
+    focusNonce: s.focusNonce + 1,
+  })),
 
   contextMenu: null,
   setContextMenu: (menu) => set({ contextMenu: menu }),

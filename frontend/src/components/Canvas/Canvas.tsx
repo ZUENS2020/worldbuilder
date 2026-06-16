@@ -84,6 +84,7 @@ export default function Canvas() {
     entities, relations, addEntity, addRelation, setSelectedEntity, setContextMenu,
     project, selectedEntityId,
     layoutNonce, setLayouting,
+    focusEntityId, focusNonce,
   } = useAppStore();
   const rf = useReactFlow();
 
@@ -230,6 +231,25 @@ export default function Canvas() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutNonce]);
+
+  // Focus on a specific entity node (from Inspector relation click)
+  const handledFocus = useRef(focusNonce);
+  useEffect(() => {
+    if (focusNonce === handledFocus.current) return;
+    handledFocus.current = focusNonce;
+
+    if (focusEntityId) {
+      // Find the node and fit view to it with smooth animation
+      window.requestAnimationFrame(() => {
+        rf.fitView({
+          nodes: [{ id: focusEntityId }],
+          padding: 0.4,
+          duration: 400,
+        });
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNonce]);
 
   const onConnect: OnConnect = useCallback(
     (params: Connection) => {

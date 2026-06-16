@@ -51,7 +51,11 @@ function EntityNode({ data, selected }: NodeProps) {
 
   return (
     <div
-      style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+      style={{
+        position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center',
+        transform: selected ? 'scale(1.15)' : 'scale(1)',
+        transition: 'transform 0.25s ease',
+      }}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
     >
