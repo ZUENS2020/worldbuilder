@@ -90,7 +90,24 @@ export default function Canvas() {
   const [relationFilter, setRelationFilter] = useState<string | undefined>(undefined);
   const [relPicker, setRelPicker] = useState<{ source: string; target: string; x: number; y: number } | null>(null);
   const lastMouseRef = useRef({ x: 0, y: 0 });
-  const nodePositions = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  // ── Persistent position storage (localStorage per project) ──
+  const POS_KEY = project ? `wb.positions.${project.id}` : '';
+  const loadPositions = (): Map<string, { x: number; y: number }> => {
+    if (!POS_KEY) return new Map();
+    try {
+      const raw = localStorage.getItem(POS_KEY);
+      if (raw) return new Map(Object.entries(JSON.parse(raw)));
+    } catch { /* corrupt data, ignore */ }
+    return new Map();
+  };
+  const savePositions = (positions: Map<string, { x: number; y: number }>) => {
+    if (!POS_KEY) return;
+    try {
+      localStorage.setItem(POS_KEY, JSON.stringify(Object.fromEntries(positions)));
+    } catch { /* quota exceeded, ignore */ }
+  };
+  const nodePositions = useRef<Map<string, { x: number; y: number }>>(loadPositions());
 
   // Track mouse position for placing the relation picker
   useEffect(() => {
@@ -108,7 +125,7 @@ export default function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  // Sync when entities/relations/filter change
+  // Sync when entities/relations/filter change — also persist positions
   const prevEntitiesRef = useRef(entities);
   const prevRelationsRef = useRef(relations);
   const prevFilterRef = useRef(relationFilter);
@@ -128,23 +145,60 @@ export default function Canvas() {
     });
     const { edges: newEdges } = buildGraphData(entities, relations, nodePositions.current, relationFilter);
     setEdges(newEdges);
+    savePositions(nodePositions.current);
   }
 
-  // Initial layout: apply radial on first load so the graph isn't random chaos
+  // Persist positions whenever nodes move (drag, layout, etc.)
+  const persistOnNodesChange: typeof onNodesChange = useCallback((changes) => {
+    onNodesChange(changes);
+    // After ReactFlow processes the change, save positions for drag-end events
+    const hasPositionChange = changes.some((c) => c.type === 'position' && c.position);
+    if (hasPositionChange) {
+      // Defer to next frame so ReactFlow has updated the node
+      requestAnimationFrame(() => {
+        setNodes((current) => {
+          current.forEach((n) => nodePositions.current.set(n.id, n.position));
+          savePositions(nodePositions.current);
+          return current;
+        });
+      });
+    }
+  }, [onNodesChange]);
+
+  // Initial layout: use cached positions if available, otherwise compute radial
   const initialLayoutDone = useRef(false);
   useEffect(() => {
     if (initialLayoutDone.current || entities.length === 0) return;
     initialLayoutDone.current = true;
-    (async () => {
-      try {
-        const laidOut = await calculateLayout(nodes, edges, 'radial', selectedEntityId ?? undefined);
-        setNodes(laidOut);
-        laidOut.forEach((n) => nodePositions.current.set(n.id, n.position));
-        window.requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 400 }));
-      } catch (e) {
-        console.error('Initial layout failed:', e);
-      }
-    })();
+
+    // Check if we have saved positions for most entities
+    const cached = nodePositions.current;
+    const coverage = entities.filter((e) => cached.has(e.id)).length / entities.length;
+
+    if (coverage > 0.5) {
+      // Enough cached positions — use them directly, no need to re-layout
+      setNodes((current) => {
+        const updated = current.map((n) => {
+          const pos = cached.get(n.id);
+          return pos ? { ...n, position: pos } : n;
+        });
+        return updated;
+      });
+      window.requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 300 }));
+    } else {
+      // No saved positions — compute radial layout
+      (async () => {
+        try {
+          const laidOut = await calculateLayout(nodes, edges, 'radial', selectedEntityId ?? undefined);
+          setNodes(laidOut);
+          laidOut.forEach((n) => nodePositions.current.set(n.id, n.position));
+          savePositions(nodePositions.current);
+          window.requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 400 }));
+        } catch (e) {
+          console.error('Initial layout failed:', e);
+        }
+      })();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entities.length]);
 
@@ -155,6 +209,9 @@ export default function Canvas() {
     handledNonce.current = layoutNonce;
 
     // Clear cached positions and recompute from scratch
+    nodePositions.current = new Map();
+    if (POS_KEY) localStorage.removeItem(POS_KEY);
+
     const freshNodes = buildGraphData(entities, relations, undefined, relationFilter).nodes;
     const freshEdges = buildGraphData(entities, relations, undefined, relationFilter).edges;
 
@@ -164,6 +221,7 @@ export default function Canvas() {
         const laidOut = await calculateLayout(freshNodes, freshEdges, 'radial', selectedEntityId ?? undefined);
         setNodes(laidOut);
         laidOut.forEach((n) => nodePositions.current.set(n.id, n.position));
+        savePositions(nodePositions.current);
         window.requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 500 }));
       } catch (e) {
         console.error('Layout failed:', e);
@@ -240,7 +298,7 @@ export default function Canvas() {
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        onNodesChange={onNodesChange}
+        onNodesChange={persistOnNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeClick={onNodeClick}
