@@ -11,7 +11,6 @@ import {
   type Edge,
   type OnConnect,
   type NodeMouseHandler,
-  type OnNodeDrag,
   BackgroundVariant,
   Panel,
   type Connection,
@@ -27,7 +26,6 @@ import { useAppStore } from '../../stores/appStore';
 import { ENTITY_CONFIG, RELATION_CONFIG } from '../../types';
 import type { Entity, Relation, EntityType } from '../../types';
 import { calculateLayout } from '../../utils/layout';
-import { ForceSimulation } from '../../utils/forceSim';
 
 const nodeTypes = { entity: EntityNode };
 const edgeTypes = { relation: RelationEdge };
@@ -85,7 +83,7 @@ export default function Canvas() {
   const {
     entities, relations, addEntity, addRelation, setSelectedEntity, setContextMenu,
     project, selectedEntityId,
-    layoutType, layoutNonce, setLayouting,
+    layoutNonce, setLayouting,
   } = useAppStore();
   const rf = useReactFlow();
 
@@ -132,82 +130,6 @@ export default function Canvas() {
     setEdges(newEdges);
   }
 
-  // --- Live force simulation (Maltego "organic" graph) ---
-  const simRef = useRef(new ForceSimulation());
-  const rafRef = useRef<number | null>(null);
-  const draggingRef = useRef<string | null>(null);
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
-
-  const stopLoop = useCallback(() => {
-    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-  }, []);
-
-  const step = useCallback(() => {
-    const sim = simRef.current;
-    const dragId = draggingRef.current;
-    if (dragId) {
-      const dn = nodesRef.current.find((n) => n.id === dragId);
-      if (dn) sim.setFixed(dragId, dn.position.x, dn.position.y);
-    }
-    const active = sim.tick();
-    setNodes((prev) =>
-      prev.map((n) => {
-        if (n.id === draggingRef.current) return n; // ReactFlow controls the dragged node
-        const p = sim.get(n.id);
-        return p ? { ...n, position: { x: p.x, y: p.y } } : n;
-      })
-    );
-    rafRef.current = active ? requestAnimationFrame(step) : null;
-  }, [setNodes]);
-
-  // Seed the simulation from the source data (entities/relations), using any
-  // cached position, so it never depends on lagging ReactFlow node state.
-  const startSim = useCallback((reheat = 1) => {
-    const sim = simRef.current;
-    const visibleIds = new Set(
-      relationFilter
-        ? relations.filter((r) => r.type === relationFilter).flatMap((r) => [r.source_id, r.target_id])
-        : entities.map((e) => e.id),
-    );
-    const positions = entities
-      .filter((e) => visibleIds.has(e.id))
-      .map((e) => {
-        const p = nodePositions.current.get(e.id);
-        return { id: e.id, x: p?.x ?? NaN, y: p?.y ?? NaN, type: e.type };
-      });
-    const links = relations
-      .filter((r) => !relationFilter || r.type === relationFilter)
-      .map((r) => ({ source: r.source_id, target: r.target_id }));
-    sim.setData(positions, links);
-    sim.reheat(reheat);
-    if (rafRef.current == null) rafRef.current = requestAnimationFrame(step);
-  }, [entities, relations, relationFilter, step]);
-
-  // Run/re-seed the live simulation for the 'force' engine whenever the graph
-  // data changes (initial load, transforms expanding new nodes, etc.).
-  // Before starting force, compute radial seed positions so the simulation
-  // starts from a sensible layout instead of random chaos.
-  useEffect(() => {
-    if (entities.length > 0 && layoutType === 'force') {
-      // Compute radial seed positions first, then hand them to force sim
-      (async () => {
-        const { nodes: seedNodes } = buildGraphData(entities, relations, undefined, relationFilter);
-        const seedEdges = buildGraphData(entities, relations, undefined, relationFilter).edges;
-        try {
-          const radialSeed = await calculateLayout(seedNodes, seedEdges, 'radial', selectedEntityId ?? undefined);
-          // Save radial positions as seed for force sim
-          radialSeed.forEach((n) => nodePositions.current.set(n.id, n.position));
-        } catch (e) {
-          console.error('Radial seed failed:', e);
-        }
-        startSim(0.9);
-      })();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entities, relations, layoutType]);
-
   // Initial layout: apply radial on first load so the graph isn't random chaos
   const initialLayoutDone = useRef(false);
   useEffect(() => {
@@ -218,7 +140,7 @@ export default function Canvas() {
         const laidOut = await calculateLayout(nodes, edges, 'radial', selectedEntityId ?? undefined);
         setNodes(laidOut);
         laidOut.forEach((n) => nodePositions.current.set(n.id, n.position));
-        window.requestAnimationFrame(() => rf.fitView({ padding: 0.2, duration: 400 }));
+        window.requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 400 }));
       } catch (e) {
         console.error('Initial layout failed:', e);
       }
@@ -226,45 +148,20 @@ export default function Canvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entities.length]);
 
-  // Clean up the animation frame on unmount
-  useEffect(() => stopLoop, [stopLoop]);
-
-  // "Apply layout" button (toolbar) + "Tidy up" button
+  // "Apply layout" / "Tidy up" button — recompute radial from scratch
   const handledNonce = useRef(layoutNonce);
   useEffect(() => {
     if (layoutNonce === handledNonce.current) return;
     handledNonce.current = layoutNonce;
 
-    // Stop any running force sim
-    stopLoop();
-
-    // For tidyUp / radial: clear cached positions and recompute from scratch
-    // so the layout isn't biased by old positions
+    // Clear cached positions and recompute from scratch
     const freshNodes = buildGraphData(entities, relations, undefined, relationFilter).nodes;
     const freshEdges = buildGraphData(entities, relations, undefined, relationFilter).edges;
 
-    if (layoutType === 'force') {
-      // Force: seed from radial first, then sim
-      (async () => {
-        setLayouting(true);
-        try {
-          const radialSeed = await calculateLayout(freshNodes, freshEdges, 'radial', selectedEntityId ?? undefined);
-          radialSeed.forEach((n) => nodePositions.current.set(n.id, n.position));
-          setNodes(radialSeed);
-        } catch (e) {
-          console.error('Radial seed failed:', e);
-        }
-        setLayouting(false);
-        startSim(1);
-      })();
-      return;
-    }
-
-    // Static layouts (radial / hierarchical): compute from scratch
     (async () => {
       setLayouting(true);
       try {
-        const laidOut = await calculateLayout(freshNodes, freshEdges, layoutType, selectedEntityId ?? undefined);
+        const laidOut = await calculateLayout(freshNodes, freshEdges, 'radial', selectedEntityId ?? undefined);
         setNodes(laidOut);
         laidOut.forEach((n) => nodePositions.current.set(n.id, n.position));
         window.requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 500 }));
@@ -275,24 +172,6 @@ export default function Canvas() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutNonce]);
-
-  // Dragging a node pins it and re-heats the simulation so neighbours react.
-  const onNodeDragStart: OnNodeDrag<Node> = useCallback((_, node) => {
-    if (layoutType !== 'force') return;
-    draggingRef.current = node.id;
-    simRef.current.setFixed(node.id, node.position.x, node.position.y);
-    startSim(0.6);
-  }, [layoutType, startSim]);
-
-  const onNodeDragStop: OnNodeDrag<Node> = useCallback((_, node) => {
-    nodePositions.current.set(node.id, node.position);
-    if (draggingRef.current === node.id) {
-      simRef.current.clearFixed(node.id);
-      draggingRef.current = null;
-      simRef.current.reheat(0.4);
-      if (rafRef.current == null) rafRef.current = requestAnimationFrame(step);
-    }
-  }, [step]);
 
   const onConnect: OnConnect = useCallback(
     (params: Connection) => {
@@ -363,8 +242,6 @@ export default function Canvas() {
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDragStop={onNodeDragStop}
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         onNodeContextMenu={onNodeContextMenu}

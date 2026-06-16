@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type { Entity, Relation, Project, TransformDef, TransformResult } from '../types';
-import type { LayoutType } from '../utils/layout';
 import { api } from '../services/api';
 
 interface AICandidate {
@@ -65,9 +64,7 @@ interface AppState {
   loading: boolean;
   setLoading: (l: boolean) => void;
 
-  // Layout (Maltego UI)
-  layoutType: LayoutType;
-  setLayoutType: (l: LayoutType) => void;
+  // Layout (Maltego UI) — radial only
   layoutNonce: number;
   requestAutoLayout: () => void;
   tidyUp: () => void;
@@ -239,12 +236,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   loading: false,
   setLoading: (l) => set({ loading: l }),
 
-  layoutType: 'radial',
-  setLayoutType: (l) => set({ layoutType: l }),
   layoutNonce: 0,
   requestAutoLayout: () => set((s) => ({ layoutNonce: s.layoutNonce + 1 })),
   tidyUp: () => set((s) => ({
-    layoutType: 'radial' as LayoutType,
     layoutNonce: s.layoutNonce + 1,
   })),
   layouting: false,
