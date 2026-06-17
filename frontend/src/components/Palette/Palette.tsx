@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { ENTITY_CONFIG, PALETTE_CATEGORIES, TAG_COLORS } from '../../types';
 import type { EntityType, Tag } from '../../types';
@@ -8,7 +8,7 @@ export const DND_MIME = 'application/worldbuilder-entity-type';
 export default function Palette() {
   const {
     addEntity, project, entities, selectedEntityIds,
-    createOpen, setCreateOpen, selectEntity,
+    createOpen, setCreateOpen, selectEntity, focusOnEntity,
     tags, addTag, removeTag, renameTag, addEntityToTag, removeEntityFromTag,
   } = useAppStore();
 
@@ -227,6 +227,7 @@ export default function Palette() {
                   tags={tags}
                   tagColor={c.color}
                   onSelect={() => selectEntity(e.id)}
+                  onFocus={() => focusOnEntity(e.id)}
                   onAddToTag={addEntityToTag}
                   onRemoveFromTag={removeEntityFromTag}
                   entityMenuId={entityMenuId}
@@ -330,6 +331,7 @@ export default function Palette() {
                       tags={tags}
                       tagColor={tag.color}
                       onSelect={() => selectEntity(e.id)}
+                      onFocus={() => focusOnEntity(e.id)}
                       onAddToTag={addEntityToTag}
                       onRemoveFromTag={removeEntityFromTag}
                       entityMenuId={entityMenuId}
@@ -380,6 +382,7 @@ export default function Palette() {
                       tags={tags}
                       tagColor="#999"
                       onSelect={() => selectEntity(e.id)}
+                      onFocus={() => focusOnEntity(e.id)}
                       onAddToTag={addEntityToTag}
                       onRemoveFromTag={removeEntityFromTag}
                       entityMenuId={entityMenuId}
@@ -484,23 +487,43 @@ export default function Palette() {
 
 // ── Entity row component with tag context menu ──
 function EntityRow({
-  entityId, name, selected, tags, tagColor, onSelect,
+  entityId, name, selected, tags, tagColor, onSelect, onFocus,
   onAddToTag, onRemoveFromTag, entityMenuId, setEntityMenuId,
   currentTagId,
 }: {
   entityId: string; name: string; selected: boolean;
-  tags: Tag[]; tagColor: string; onSelect: () => void;
+  tags: Tag[]; tagColor: string; onSelect: () => void; onFocus: () => void;
   onAddToTag: (eid: string, tid: string) => void;
   onRemoveFromTag: (eid: string, tid: string) => void;
   entityMenuId: string | null; setEntityMenuId: (id: string | null) => void;
   currentTagId?: string;
 }) {
   const isOpen = entityMenuId === entityId;
+  const clickTimer = useRef<number | null>(null);
+
+  const handleClick = () => {
+    if (clickTimer.current) window.clearTimeout(clickTimer.current);
+    clickTimer.current = window.setTimeout(() => {
+      onSelect();
+      clickTimer.current = null;
+    }, 250);
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (clickTimer.current) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    onFocus();
+  };
 
   return (
     <div style={{ position: 'relative' }}>
       <div
-        onClick={onSelect}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        title="单击选择 · 双击定位到画布"
         style={{
           display: 'flex', alignItems: 'center', gap: 4, padding: '2px 10px 2px 24px',
           cursor: 'pointer', fontSize: 11, lineHeight: 1.4,

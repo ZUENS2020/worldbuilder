@@ -10,6 +10,7 @@ dist-ssr/
 
 # Database
 *.db
+data/
 
 # Environment & secrets
 .env

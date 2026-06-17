@@ -329,17 +329,35 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   focusEntityId: null,
   focusNonce: 0,
-  focusOnEntity: (id) => set((s) => ({
-    selectedEntityId: id,
-    selectedEntityIds: [id],
-    focusEntityId: id,
-    focusNonce: s.focusNonce + 1,
-    // Focusing an entity (e.g. from the Palette) also pins it onto the canvas
-    // when exploring, so clicking a list item brings it into the investigation.
-    visibleEntityIds: s.explorationMode
-      ? new Set(s.visibleEntityIds).add(id)
-      : s.visibleEntityIds,
-  })),
+  focusOnEntity: (id) => set((s) => {
+    const base = {
+      selectedEntityId: id,
+      selectedEntityIds: [id],
+      focusEntityId: id,
+      focusNonce: s.focusNonce + 1,
+    };
+    if (s.explorationMode && !s.visibleEntityIds.has(id)) {
+      const next = new Set(s.visibleEntityIds);
+      next.add(id);
+      return {
+        ...base,
+        visibleEntityIds: next,
+        explorationHistory: _pushHist(s.explorationHistory, s.visibleEntityIds),
+        revealSignal: {
+          nonce: (s.revealSignal?.nonce ?? 0) + 1,
+          pivotId: id,
+          resultEntityIds: [id],
+          newEntityIds: [id],
+          relationIds: [],
+          fit: true,
+        },
+      };
+    }
+    if (s.explorationMode) {
+      return { ...base, visibleEntityIds: new Set(s.visibleEntityIds).add(id) };
+    }
+    return base;
+  }),
 
   inspectorTab: 'details',
   setInspectorTab: (tab) => set({ inspectorTab: tab }),
