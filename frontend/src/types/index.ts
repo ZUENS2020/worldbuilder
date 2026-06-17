@@ -23,6 +23,43 @@ export interface Relation {
   project_id: string;
 }
 
+export interface GraphHopSettings {
+  transform_expand: number;   // Transform 图谱展开
+  transform_enemy: number;    // 查找敌对阵营搜索深度
+  ai_context: number;         // AI 推断 / 矛盾 / 背景 关系上下文
+  writing_context: number;    // 写作工作台 & ST 插件上下文
+  isolate_subgraph: number;   // 探索模式「只看子图」
+}
+
+export const DEFAULT_GRAPH_HOPS: GraphHopSettings = {
+  transform_expand: 1,
+  transform_enemy: 2,
+  ai_context: 1,
+  writing_context: 2,
+  isolate_subgraph: 2,
+};
+
+const MIN_HOP = 1;
+const MAX_HOP = 5;
+
+function clampHop(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : parseInt(String(value), 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.max(MIN_HOP, Math.min(MAX_HOP, n));
+}
+
+/** Merge project.settings.graph_hops with defaults (mirrors backend hop_settings.py). */
+export function getGraphHops(project?: Project | null): GraphHopSettings {
+  const merged = { ...DEFAULT_GRAPH_HOPS };
+  const raw = project?.settings?.graph_hops;
+  if (raw && typeof raw === 'object') {
+    for (const key of Object.keys(DEFAULT_GRAPH_HOPS) as (keyof GraphHopSettings)[]) {
+      if (key in raw) merged[key] = clampHop((raw as Record<string, unknown>)[key], merged[key]);
+    }
+  }
+  return merged;
+}
+
 export interface Project {
   id: string;
   name: string;

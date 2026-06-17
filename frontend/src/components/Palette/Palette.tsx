@@ -7,8 +7,8 @@ export const DND_MIME = 'application/worldbuilder-entity-type';
 
 export default function Palette() {
   const {
-    addEntity, project, entities, selectedEntityId,
-    createOpen, setCreateOpen, focusOnEntity,
+    addEntity, project, entities, selectedEntityIds,
+    createOpen, setCreateOpen, selectEntity,
     tags, addTag, removeTag, renameTag, addEntityToTag, removeEntityFromTag,
   } = useAppStore();
 
@@ -147,8 +147,11 @@ export default function Palette() {
           );
         })}
 
-        {/* ── Separator ── */}
-        <div style={{ height: 6 }} />
+        {/* ── Separator between palette categories and the entity overview ── */}
+        <div style={{
+          margin: '8px 0 0',
+          borderTop: '1px solid var(--mt-border)',
+        }} />
 
         {/* View mode tabs */}
         <div style={{
@@ -220,10 +223,10 @@ export default function Palette() {
                   key={e.id}
                   entityId={e.id}
                   name={e.name}
-                  selected={selectedEntityId === e.id}
+                  selected={selectedEntityIds.includes(e.id)}
                   tags={tags}
                   tagColor={c.color}
-                  onSelect={() => focusOnEntity(e.id)}
+                  onSelect={() => selectEntity(e.id)}
                   onAddToTag={addEntityToTag}
                   onRemoveFromTag={removeEntityFromTag}
                   entityMenuId={entityMenuId}
@@ -323,10 +326,10 @@ export default function Palette() {
                       key={e.id}
                       entityId={e.id}
                       name={e.name}
-                      selected={selectedEntityId === e.id}
+                      selected={selectedEntityIds.includes(e.id)}
                       tags={tags}
                       tagColor={tag.color}
-                      onSelect={() => focusOnEntity(e.id)}
+                      onSelect={() => selectEntity(e.id)}
                       onAddToTag={addEntityToTag}
                       onRemoveFromTag={removeEntityFromTag}
                       entityMenuId={entityMenuId}
@@ -373,10 +376,10 @@ export default function Palette() {
                       key={e.id}
                       entityId={e.id}
                       name={e.name}
-                      selected={selectedEntityId === e.id}
+                      selected={selectedEntityIds.includes(e.id)}
                       tags={tags}
                       tagColor="#999"
-                      onSelect={() => focusOnEntity(e.id)}
+                      onSelect={() => selectEntity(e.id)}
                       onAddToTag={addEntityToTag}
                       onRemoveFromTag={removeEntityFromTag}
                       entityMenuId={entityMenuId}

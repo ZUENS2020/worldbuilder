@@ -217,6 +217,7 @@ async function autoDetectProject() {
 async function fetchGraphContext(projectId, characterNames) {
     const params = new URLSearchParams({
         characters: characterNames.join(','),
+        hop: String(settings.max_hop || 2),
     });
 
     const response = await fetch(

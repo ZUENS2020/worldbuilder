@@ -6,9 +6,10 @@ from sqlalchemy import select
 import uuid
 
 from app.database import get_db
-from app.models.models import Entity
+from app.models.models import Entity, Project
 from app.schemas import EntityCreate, EntityUpdate, EntityOut, NeighborResult, GraphContext
 from app.graph.engine import graph_engine
+from app.graph.hop_settings import resolve_graph_hops
 
 router = APIRouter(prefix="/api/projects/{project_id}/entities", tags=["entities"])
 
@@ -52,8 +53,14 @@ async def get_context(
     project_id: str,
     characters: str = Query(..., description="Comma-separated character names or IDs"),
     scene: str = Query(None),
+    hop: int = Query(None, ge=1, le=5, description="Override context hop depth (default from project settings)"),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get graph context for ST plugin injection."""
+    project = await db.get(Project, project_id)
+    hops = resolve_graph_hops(project.settings if project else {})
+    context_hop = hop if hop is not None else hops["writing_context"]
+
     char_list = [c.strip() for c in characters.split(",")]
     entity_ids = []
     for c in char_list:
@@ -65,7 +72,9 @@ async def get_context(
                     entity_ids.append(eid)
                     break
 
-    result = graph_engine.get_context(entity_ids, project_id=project_id, scene=scene)
+    result = graph_engine.get_context(
+        entity_ids, project_id=project_id, scene=scene, context_hop=context_hop,
+    )
     return GraphContext(**result)
 
 

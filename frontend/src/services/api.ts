@@ -105,7 +105,18 @@ export const api = {
   // Streaming generation (M2b/M4)
   generateStream: (
     projectId: string,
-    data: { mode: string; context_entity_ids: string[]; context_event_ids: string[]; scene_description?: string },
+    data: {
+      mode: string;
+      context_entity_ids: string[];
+      context_event_ids: string[];
+      scene_description?: string;
+      length?: string;
+      style?: string;
+      pov?: string;
+      language?: string;
+      instruction?: string;
+      prior_text?: string;
+    },
     onChunk: (text: string) => void,
   ) => streamPost(`/projects/${projectId}/generate/stream`, data, onChunk),
 };

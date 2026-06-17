@@ -13,7 +13,7 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
 export default function Toolbar() {
   const rf = useReactFlow();
   const {
-    layouting, setCreateOpen, tidyUp,
+    layouting, setCreateOpen, tidyUp, layoutMode, setLayoutMode,
   } = useAppStore();
 
   return (
@@ -27,11 +27,22 @@ export default function Toolbar() {
         borderBottom: '1px solid var(--mt-border)',
       }}
     >
-      {/* Brand */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingRight: 10 }}>
+      {/* Brand → GitHub */}
+      <a
+        href="https://github.com/ZUENS2020/worldbuilder"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="在 GitHub 查看源码"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 7, paddingRight: 10,
+          textDecoration: 'none', cursor: 'pointer',
+        }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.7'; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1'; }}
+      >
         <span style={{ fontSize: 18 }}>🌐</span>
         <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--mt-accent-dark)' }}>WorldBuilder</span>
-      </div>
+      </a>
       <div className="mt-sep" />
 
       <Group label="实体">
@@ -46,11 +57,29 @@ export default function Toolbar() {
           className="mt-btn"
           onClick={tidyUp}
           disabled={layouting}
-          title="一键整理：以人物为中心重新排列，同阵营聚拢，消除重叠"
+          title="一键整理：按当前布局模式重新排列，消除重叠、减少连线交叉"
           style={{ fontWeight: 600, fontSize: 12, padding: '4px 12px' }}
         >
           {layouting ? <span className="mt-spin">⏳</span> : '✨'} 整理
         </button>
+        <div style={{ display: 'flex', border: '1px solid var(--mt-border)', borderRadius: 4, overflow: 'hidden', marginLeft: 4 }}>
+          {([['radial', '径向'], ['force', '力导向']] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              onClick={() => setLayoutMode(mode)}
+              disabled={layouting}
+              title={mode === 'radial' ? '同心圆：以主角色为中心分环排列' : '力导向：相关节点自然成簇'}
+              style={{
+                fontSize: 10, padding: '3px 8px', border: 'none', cursor: 'pointer',
+                background: layoutMode === mode ? 'var(--mt-accent)' : 'transparent',
+                color: layoutMode === mode ? '#fff' : 'var(--mt-text-muted)',
+                fontWeight: layoutMode === mode ? 600 : 400,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </Group>
       <div className="mt-sep" />
 

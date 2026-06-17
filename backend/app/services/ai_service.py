@@ -291,50 +291,151 @@ async def ai_generate_backstory(
 
 # ── Streaming generation (M4 uses this) ─────────────────────────
 
+# length → (字数描述, max_tokens)
+_LENGTH_MAP = {
+    "short": ("约300-500字", 1024),
+    "medium": ("约600-1000字", 2048),
+    "long": ("约1500-2000字", 4096),
+}
+_POV_MAP = {
+    "first": "第一人称（“我”）",
+    "third": "第三人称",
+    "omniscient": "全知视角",
+}
+_LANG_MAP = {"zh": "中文", "en": "English"}
+
+_EMPTY_CONTEXT_PLACEHOLDER = "（未提供世界观设定，请仅依据下方场景描述创作，不要凭空杜撰具体人名或设定。）"
+
+
+def _build_requirements(
+    *, length: str, style: str, pov: str, language: str, instruction: str
+) -> str:
+    """Assemble the shared 「要求」bullet list from generation params."""
+    word_desc, _ = _LENGTH_MAP.get(length, _LENGTH_MAP["medium"])
+    pov_desc = _POV_MAP.get(pov, _POV_MAP["third"])
+    lang_desc = _LANG_MAP.get(language, "中文")
+    bullets = [
+        "严格遵循上下文中的人物关系、性格与设定，不得OOC或与设定矛盾",
+        f"篇幅：{word_desc}",
+        f"叙事视角：{pov_desc}",
+        f"使用{lang_desc}写作",
+        "有对话、动作、环境描写，有画面感",
+    ]
+    if style:
+        bullets.insert(1, f"文风：{style}")
+    if instruction:
+        bullets.append(f"额外要求：{instruction}")
+    return "\n".join(f"- {b}" for b in bullets)
+
+
+def _max_tokens_for(length: str) -> int:
+    return _LENGTH_MAP.get(length, _LENGTH_MAP["medium"])[1]
+
+
 async def ai_generate_scene_stream(
     context_text: str,
     scene_description: str,
     *,
+    length: str = "medium",
+    style: str = "",
+    pov: str = "third",
+    language: str = "zh",
+    instruction: str = "",
     config: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream a scene/chapter prose using graph context."""
-    prompt = f"""你是一位专业的小说续写助手。请根据以下世界观上下文，写一段场景正文。
+    ctx = context_text.strip() if context_text else ""
+    if not ctx:
+        ctx = _EMPTY_CONTEXT_PLACEHOLDER
+    requirements = _build_requirements(
+        length=length, style=style, pov=pov, language=language, instruction=instruction
+    )
+    prompt = f"""你是一位专业的小说创作助手。请根据以下世界观上下文，写一段场景正文。
 
 世界观上下文：
-{context_text}
+{ctx}
 
-场景描述：{scene_description}
+场景描述：{scene_description or "（未填写，自行根据世界观设定展开）"}
 
 要求：
-- 严格遵循上下文中的人物关系和性格设定，不得OOC
-- 500-1000字
-- 有对话、动作、环境描写
-- 风格与上下文一致"""
+{requirements}"""
 
     messages = [
-        {"role": "system", "content": "你是专业的小说续写助手。你写的文字必须严格遵循给定的世界观上下文，不得偏离人物设定。"},
+        {"role": "system", "content": "你是专业的小说创作助手。你写的文字必须严格遵循给定的世界观上下文，不得偏离人物设定。"},
         {"role": "user", "content": prompt},
     ]
-    async for chunk in stream_ai(messages, config=config, temperature=0.8, max_tokens=2048):
+    async for chunk in stream_ai(
+        messages, config=config, temperature=0.8, max_tokens=_max_tokens_for(length)
+    ):
+        yield chunk
+
+
+async def ai_continue_scene_stream(
+    context_text: str,
+    prior_text: str,
+    *,
+    length: str = "medium",
+    style: str = "",
+    pov: str = "third",
+    language: str = "zh",
+    instruction: str = "",
+    config: dict | None = None,
+) -> AsyncGenerator[str, None]:
+    """Continue writing from existing prose, keeping style & setting coherent."""
+    ctx = context_text.strip() if context_text else _EMPTY_CONTEXT_PLACEHOLDER
+    requirements = _build_requirements(
+        length=length, style=style, pov=pov, language=language, instruction=instruction
+    )
+    prompt = f"""你是一位专业的小说创作助手。请**接着**下面的已有正文继续写下去，保持文风、人称与设定连贯，自然衔接，不要重复已有内容，不要重写开头。
+
+世界观上下文：
+{ctx}
+
+已有正文（请从结尾处续写）：
+{prior_text}
+
+要求：
+{requirements}
+- 直接输出续写的正文，不要复述上文"""
+
+    messages = [
+        {"role": "system", "content": "你是专业的小说创作助手，擅长无缝续写。你输出的文字必须紧接已有正文，风格与设定保持一致。"},
+        {"role": "user", "content": prompt},
+    ]
+    async for chunk in stream_ai(
+        messages, config=config, temperature=0.8, max_tokens=_max_tokens_for(length)
+    ):
         yield chunk
 
 
 async def ai_generate_outline_stream(
     context_text: str,
     *,
+    style: str = "",
+    language: str = "zh",
+    instruction: str = "",
     config: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream a story outline using the full graph context."""
+    ctx = context_text.strip() if context_text else _EMPTY_CONTEXT_PLACEHOLDER
+    lang_desc = _LANG_MAP.get(language, "中文")
+    extra = []
+    if style:
+        extra.append(f"- 整体基调/文风：{style}")
+    if instruction:
+        extra.append(f"- 额外要求：{instruction}")
+    extra_block = ("\n" + "\n".join(extra)) if extra else ""
     prompt = f"""你是一位小说大纲策划专家。请根据以下世界观信息，生成一份故事大纲。
 
 世界观上下文：
-{context_text}
+{ctx}
 
 要求：
 - 3-5幕结构
 - 每幕标注关键转折点和涉及的人物
 - 标注伏笔和呼应
-- 500字左右"""
+- 使用{lang_desc}撰写
+- 500字左右{extra_block}"""
 
     messages = [
         {"role": "system", "content": "你是小说大纲策划专家，擅长从复杂人物关系中发现戏剧冲突。"},

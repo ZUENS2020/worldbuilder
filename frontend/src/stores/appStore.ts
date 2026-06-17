@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Entity, Relation, Project, TransformDef, TransformResult, Tag, CustomRelationType } from '../types';
+import { getGraphHops } from '../types';
 import { api } from '../services/api';
 
 interface AICandidate {
@@ -48,21 +49,57 @@ interface AppState {
 
   // Selection
   selectedEntityId: string | null;
+  selectedEntityIds: string[];
   setSelectedEntity: (id: string | null) => void;
+  setSelectedEntities: (ids: string[]) => void;
+  toggleEntitySelection: (id: string) => void;
 
   // Focus (highlight + fitView to a node in the graph)
   focusEntityId: string | null;
   focusNonce: number;
   focusOnEntity: (id: string) => void;
 
-  // Context menu
-  contextMenu: { x: number; y: number; entityId: string } | null;
-  setContextMenu: (menu: { x: number; y: number; entityId: string } | null) => void;
+  // Inspector right panel tab
+  inspectorTab: 'details' | 'transform';
+  setInspectorTab: (tab: 'details' | 'transform') => void;
 
   // Transforms
   transforms: TransformDef[];
   loadTransforms: (entityType: string) => Promise<void>;
   executeTransform: (entityId: string, transformType: string) => Promise<TransformResult | null>;
+  executeAllGraphTransforms: (entityId: string) => Promise<TransformResult | null>;
+  // Highlight cluster on canvas after a Transform (persists until cleared).
+  activeTransformHighlight: { entityIds: string[]; relationIds: string[] } | null;
+  clearTransformHighlight: () => void;
+
+  // Exploration mode (Maltego-style incremental reveal)
+  // When on, the canvas only shows the "visible subgraph" — you pin a seed
+  // and each Transform reveals more nodes around it.
+  explorationMode: boolean;
+  setExplorationMode: (b: boolean) => void;
+  visibleEntityIds: Set<string>;
+  pinEntity: (id: string) => void;
+  unpinEntity: (id: string) => void;
+  showAllEntities: () => void;
+  isolateSubgraph: (id: string, hop?: number) => void;
+  // Step history for the exploration canvas (undo / reset-to-start).
+  explorationHistory: Set<string>[];
+  explorationInitial: Set<string>;
+  undoExploration: () => void;
+  resetExploration: () => void;
+  // Transient signal telling the Canvas to position + highlight + fit a reveal.
+  // `fit: false` keeps the camera still (used for plain list selection).
+  revealSignal: {
+    nonce: number;
+    pivotId: string;
+    resultEntityIds: string[];
+    newEntityIds: string[];
+    relationIds: string[];
+    fit?: boolean;
+    persistHighlight?: boolean;
+  } | null;
+  // Select an entity (e.g. from the left Palette) without moving the camera.
+  selectEntity: (id: string) => void;
 
   // AI Candidates (M2c: preview before commit)
   aiCandidates: AICandidate[];
@@ -73,7 +110,9 @@ interface AppState {
   loading: boolean;
   setLoading: (l: boolean) => void;
 
-  // Layout (Maltego UI) — radial only
+  // Layout (Maltego UI) — switchable radial / force
+  layoutMode: 'radial' | 'force';
+  setLayoutMode: (m: 'radial' | 'force') => void;
   layoutNonce: number;
   requestAutoLayout: () => void;
   tidyUp: () => void;
@@ -131,11 +170,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Reset selection/focus state before loading new project
     set({
       selectedEntityId: null,
+      selectedEntityIds: [],
       focusEntityId: null,
       focusNonce: 0,
-      contextMenu: null,
       aiCandidates: [],
       documents: [],
+      visibleEntityIds: new Set<string>(),
+      explorationHistory: [],
+      explorationInitial: new Set<string>(),
+      revealSignal: null,
+      activeTransformHighlight: null,
+      inspectorTab: 'details',
     });
     await get().loadProjectData(id);
     // Also refresh the project list to keep it in sync
@@ -173,7 +218,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       ]);
       const tags: Tag[] = Array.isArray(project?.settings?.tags) ? project.settings.tags : [];
       const customRelationTypes: CustomRelationType[] = Array.isArray(project?.settings?.customRelationTypes) ? project.settings.customRelationTypes : [];
-      set({ project, entities, relations, tags, customRelationTypes, loading: false });
+      set({
+        project, entities, relations, tags, customRelationTypes, loading: false,
+        // In exploration mode, start from a clean canvas for the new project.
+        visibleEntityIds: get().explorationMode ? new Set<string>() : get().visibleEntityIds,
+        revealSignal: null,
+      });
     } catch (e) {
       console.error('Failed to load project:', e);
       set({ loading: false });
@@ -184,7 +234,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const projectId = get().project?.id;
     if (!projectId) throw new Error('No project selected');
     const entity = await api.createEntity(projectId, data);
-    set((s) => ({ entities: [...s.entities, entity] }));
+    set((s) => ({
+      entities: [...s.entities, entity],
+      // Newly created entities are auto-pinned so they show in exploration mode.
+      visibleEntityIds: s.explorationMode
+        ? new Set(s.visibleEntityIds).add(entity.id)
+        : s.visibleEntityIds,
+      explorationHistory: s.explorationMode
+        ? _pushHist(s.explorationHistory, s.visibleEntityIds)
+        : s.explorationHistory,
+    }));
     return entity;
   },
 
@@ -199,11 +258,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     const projectId = get().project?.id;
     if (!projectId) return;
     await api.deleteEntity(projectId, id);
-    set((s) => ({
-      entities: s.entities.filter((e) => e.id !== id),
-      relations: s.relations.filter((r) => r.source_id !== id && r.target_id !== id),
-      selectedEntityId: s.selectedEntityId === id ? null : s.selectedEntityId,
-    }));
+    set((s) => {
+      const ids = s.selectedEntityIds.filter((eid) => eid !== id);
+      return {
+        entities: s.entities.filter((e) => e.id !== id),
+        relations: s.relations.filter((r) => r.source_id !== id && r.target_id !== id),
+        selectedEntityIds: ids,
+        selectedEntityId: ids[0] ?? null,
+      };
+    });
   },
 
   addRelation: async (data) => {
@@ -222,18 +285,67 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   selectedEntityId: null,
-  setSelectedEntity: (id) => set({ selectedEntityId: id }),
+  selectedEntityIds: [],
+  setSelectedEntity: (id) => set({
+    selectedEntityId: id,
+    selectedEntityIds: id ? [id] : [],
+  }),
+  setSelectedEntities: (ids) => set({
+    selectedEntityIds: ids,
+    selectedEntityId: ids[0] ?? null,
+  }),
+  toggleEntitySelection: (id) => set((s) => {
+    const next = new Set(s.selectedEntityIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    const ids = [...next];
+    return { selectedEntityIds: ids, selectedEntityId: ids[0] ?? null };
+  }),
+
+  selectEntity: (id) => set((s) => {
+    // In exploration mode, selecting a not-yet-visible entity pins it onto the
+    // canvas (positioned, but the camera stays put). Otherwise it's a pure
+    // selection — the canvas only highlights the node, no panning/zooming.
+    if (s.explorationMode && !s.visibleEntityIds.has(id)) {
+      const next = new Set(s.visibleEntityIds);
+      next.add(id);
+      return {
+        selectedEntityId: id,
+        selectedEntityIds: [id],
+        visibleEntityIds: next,
+        explorationHistory: _pushHist(s.explorationHistory, s.visibleEntityIds),
+        revealSignal: {
+          nonce: (s.revealSignal?.nonce ?? 0) + 1,
+          pivotId: id,
+          resultEntityIds: [id],
+          newEntityIds: [id],
+          relationIds: [],
+          fit: false,
+        },
+      };
+    }
+    return { selectedEntityId: id, selectedEntityIds: [id] };
+  }),
 
   focusEntityId: null,
   focusNonce: 0,
   focusOnEntity: (id) => set((s) => ({
     selectedEntityId: id,
+    selectedEntityIds: [id],
     focusEntityId: id,
     focusNonce: s.focusNonce + 1,
+    // Focusing an entity (e.g. from the Palette) also pins it onto the canvas
+    // when exploring, so clicking a list item brings it into the investigation.
+    visibleEntityIds: s.explorationMode
+      ? new Set(s.visibleEntityIds).add(id)
+      : s.visibleEntityIds,
   })),
 
-  contextMenu: null,
-  setContextMenu: (menu) => set({ contextMenu: menu }),
+  inspectorTab: 'details',
+  setInspectorTab: (tab) => set({ inspectorTab: tab }),
+
+  activeTransformHighlight: null,
+  clearTransformHighlight: () => set({ activeTransformHighlight: null }),
 
   transforms: [],
   loadTransforms: async (entityType) => {
@@ -268,12 +380,267 @@ export const useAppStore = create<AppState>((set, get) => ({
         entities: mergeById<Entity>(s.entities, result.new_entities),
         relations: mergeById<Relation>(s.relations, result.new_relations),
       }));
+
+      // ── Incremental reveal: figure out what this Transform surfaced ──
+      const s = get();
+      const resultIds = new Set<string>([entityId]);
+      for (const e of result.new_entities) resultIds.add(e.id);
+      for (const r of result.new_relations) { resultIds.add(r.source_id); resultIds.add(r.target_id); }
+      const beforeVisible = s.explorationMode
+        ? s.visibleEntityIds
+        : new Set(s.entities.map((e) => e.id));
+      const newEntityIds = [...resultIds].filter((id) => !beforeVisible.has(id));
+      const relationIds = result.new_relations.map((r: Relation) => r.id);
+
+      if (s.explorationMode) {
+        const nextVisible = new Set(s.visibleEntityIds);
+        resultIds.forEach((id) => nextVisible.add(id));
+        const grew = nextVisible.size > s.visibleEntityIds.size;
+        set({
+          visibleEntityIds: nextVisible,
+          explorationHistory: grew ? _pushHist(s.explorationHistory, s.visibleEntityIds) : s.explorationHistory,
+        });
+      }
+      set((st) => ({
+        activeTransformHighlight: {
+          entityIds: [...resultIds],
+          relationIds,
+        },
+        revealSignal: {
+          nonce: (st.revealSignal?.nonce ?? 0) + 1,
+          pivotId: entityId,
+          resultEntityIds: [...resultIds],
+          newEntityIds,
+          relationIds,
+          persistHighlight: false,
+        },
+      }));
       return result;
     } catch (e) {
       console.error('Transform failed:', e);
       return null;
     }
   },
+
+  executeAllGraphTransforms: async (entityId) => {
+    const projectId = get().project?.id;
+    if (!projectId) return null;
+    const entity = get().entities.find((e) => e.id === entityId);
+    if (!entity) return null;
+
+    let transformList = get().transforms.filter((t) => !t.id.startsWith('ai_'));
+    if (transformList.length === 0) {
+      const allTransforms = await api.getTransforms(projectId, entity.type);
+      set({ transforms: allTransforms });
+      transformList = allTransforms.filter((t: TransformDef) => !t.id.startsWith('ai_'));
+    }
+
+    const mergeById = <T extends { id: string }>(existing: T[], incoming: T[]): T[] => {
+      const byId = new Map(existing.map((x) => [x.id, x]));
+      for (const item of incoming) byId.set(item.id, item);
+      return Array.from(byId.values());
+    };
+
+    let mergedEntities = get().entities;
+    let mergedRelations = get().relations;
+    const resultIds = new Set<string>([entityId]);
+    const relationIdSet = new Set<string>();
+
+    for (const t of transformList) {
+      try {
+        const result = await api.executeTransform(projectId, {
+          entity_id: entityId,
+          transform_type: t.id,
+        });
+        mergedEntities = mergeById(mergedEntities, result.new_entities);
+        mergedRelations = mergeById(mergedRelations, result.new_relations);
+        for (const e of result.new_entities) resultIds.add(e.id);
+        for (const r of result.new_relations) {
+          resultIds.add(r.source_id);
+          resultIds.add(r.target_id);
+          relationIdSet.add(r.id);
+        }
+      } catch {
+        /* keep going with remaining transforms */
+      }
+    }
+
+    set({ entities: mergedEntities, relations: mergedRelations });
+
+    const s = get();
+    const beforeVisible = s.explorationMode
+      ? s.visibleEntityIds
+      : new Set(s.entities.map((e) => e.id));
+    const newEntityIds = [...resultIds].filter((id) => !beforeVisible.has(id));
+    const relationIds = [...relationIdSet];
+
+    if (s.explorationMode) {
+      const nextVisible = new Set(s.visibleEntityIds);
+      resultIds.forEach((id) => nextVisible.add(id));
+      const grew = nextVisible.size > s.visibleEntityIds.size;
+      set({
+        visibleEntityIds: nextVisible,
+        explorationHistory: grew ? _pushHist(s.explorationHistory, s.visibleEntityIds) : s.explorationHistory,
+      });
+    }
+
+    set((st) => ({
+      activeTransformHighlight: {
+        entityIds: [...resultIds],
+        relationIds,
+      },
+      revealSignal: {
+        nonce: (st.revealSignal?.nonce ?? 0) + 1,
+        pivotId: entityId,
+        resultEntityIds: [...resultIds],
+        newEntityIds,
+        relationIds,
+        persistHighlight: true,
+      },
+    }));
+
+    return {
+      new_entities: mergedEntities.filter((e) => resultIds.has(e.id) && e.id !== entityId),
+      new_relations: mergedRelations.filter((r) => relationIdSet.has(r.id)),
+      message: `已展开 ${resultIds.size - 1} 个关联实体（${transformList.length} 个 Transform）`,
+    };
+  },
+
+  // ── Exploration mode ──
+  explorationMode: false,
+  visibleEntityIds: new Set<string>(),
+  revealSignal: null,
+
+  setExplorationMode: (b) => set((s) => {
+    if (b) {
+      // Start the investigation from the currently selected node, if any.
+      // Otherwise begin blank and let the empty-state prompt the user to pick.
+      const seed = new Set<string>();
+      if (s.selectedEntityId) seed.add(s.selectedEntityId);
+      return {
+        explorationMode: true,
+        visibleEntityIds: seed,
+        explorationInitial: new Set(seed),
+        explorationHistory: [],
+        revealSignal: s.selectedEntityId
+          ? {
+              nonce: (s.revealSignal?.nonce ?? 0) + 1,
+              pivotId: s.selectedEntityId,
+              resultEntityIds: [s.selectedEntityId],
+              newEntityIds: [s.selectedEntityId],
+              relationIds: [],
+            }
+          : null,
+      };
+    }
+    return { explorationMode: false, revealSignal: null };
+  }),
+
+  explorationHistory: [],
+  explorationInitial: new Set<string>(),
+
+  pinEntity: (id) => set((s) => {
+    if (s.visibleEntityIds.has(id)) {
+      // Already on the canvas — just re-focus it (no new step).
+      return {
+        revealSignal: {
+          nonce: (s.revealSignal?.nonce ?? 0) + 1,
+          pivotId: id, resultEntityIds: [id], newEntityIds: [], relationIds: [],
+        },
+      };
+    }
+    const next = new Set(s.visibleEntityIds);
+    next.add(id);
+    return {
+      visibleEntityIds: next,
+      explorationHistory: _pushHist(s.explorationHistory, s.visibleEntityIds),
+      revealSignal: {
+        nonce: (s.revealSignal?.nonce ?? 0) + 1,
+        pivotId: id,
+        resultEntityIds: [id],
+        newEntityIds: [id],
+        relationIds: [],
+      },
+    };
+  }),
+
+  unpinEntity: (id) => set((s) => {
+    if (!s.visibleEntityIds.has(id)) return {};
+    const next = new Set(s.visibleEntityIds);
+    next.delete(id);
+    const ids = s.selectedEntityIds.filter((eid) => eid !== id);
+    return {
+      visibleEntityIds: next,
+      explorationHistory: _pushHist(s.explorationHistory, s.visibleEntityIds),
+      selectedEntityIds: ids,
+      selectedEntityId: ids[0] ?? null,
+    };
+  }),
+
+  undoExploration: () => set((s) => {
+    if (s.explorationHistory.length === 0) return {};
+    const history = [...s.explorationHistory];
+    const prev = history.pop()!;
+    return {
+      visibleEntityIds: prev,
+      explorationHistory: history,
+      revealSignal: _fitReveal(s.revealSignal?.nonce ?? 0, [...prev], s.relations),
+    };
+  }),
+
+  resetExploration: () => set((s) => ({
+    visibleEntityIds: new Set(s.explorationInitial),
+    explorationHistory: [],
+    revealSignal: _fitReveal(s.revealSignal?.nonce ?? 0, [...s.explorationInitial], s.relations),
+  })),
+
+  showAllEntities: () => set((s) => ({
+    visibleEntityIds: new Set(s.entities.map((e) => e.id)),
+    explorationHistory: _pushHist(s.explorationHistory, s.visibleEntityIds),
+    revealSignal: null,
+  })),
+
+  isolateSubgraph: (id, hop?) => set((s) => {
+    const depth = hop ?? getGraphHops(s.project).isolate_subgraph;
+    // BFS over current relations to collect everything within `depth` of `id`.
+    const adjacency = new Map<string, string[]>();
+    for (const r of s.relations) {
+      if (!adjacency.has(r.source_id)) adjacency.set(r.source_id, []);
+      if (!adjacency.has(r.target_id)) adjacency.set(r.target_id, []);
+      adjacency.get(r.source_id)!.push(r.target_id);
+      adjacency.get(r.target_id)!.push(r.source_id);
+    }
+    const visible = new Set<string>([id]);
+    let frontier = [id];
+    for (let h = 0; h < depth; h++) {
+      const next: string[] = [];
+      for (const cur of frontier) {
+        for (const nb of adjacency.get(cur) ?? []) {
+          if (!visible.has(nb)) { visible.add(nb); next.push(nb); }
+        }
+      }
+      frontier = next;
+    }
+    const relationIds = s.relations
+      .filter((r) => visible.has(r.source_id) && visible.has(r.target_id))
+      .map((r) => r.id);
+    return {
+      explorationMode: true,
+      visibleEntityIds: visible,
+      selectedEntityId: id,
+      selectedEntityIds: [id],
+      // Isolating from overview starts a fresh investigation rooted at `id`.
+      explorationInitial: s.explorationMode ? s.explorationInitial : new Set<string>([id]),
+      explorationHistory: s.explorationMode ? _pushHist(s.explorationHistory, s.visibleEntityIds) : [],
+      revealSignal: {
+        nonce: (s.revealSignal?.nonce ?? 0) + 1,
+        pivotId: id,
+        resultEntityIds: [...visible],
+        newEntityIds: [...visible].filter((eid) => eid !== id),
+        relationIds,
+      },
+    };
+  }),
 
   // AI Candidates
   aiCandidates: [],
@@ -282,7 +649,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     const projectId = get().project?.id;
     if (!projectId) return;
     // Commit selected candidates using existing entity/relation create APIs
+    const revealedEntityIds = new Set<string>();
+    const revealedRelationIds: string[] = [];
+    let pivotId = '';
     for (const c of selected) {
+      pivotId = pivotId || c.source_entity_id;
+      revealedEntityIds.add(c.source_entity_id);
       // Find or create target entity
       let targetId: string;
       const existing = get().entities.find((e) => e.name === c.target_name);
@@ -296,21 +668,48 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
         targetId = created.id;
       }
+      revealedEntityIds.add(targetId);
       // Create relation
-      await get().addRelation({
+      const rel = await get().addRelation({
         source_id: c.source_entity_id,
         target_id: targetId,
         type: c.relation_type,
         properties: { description: c.description, ai_inferred: true, confidence: c.confidence },
         weight: c.confidence,
       });
+      revealedRelationIds.push(rel.id);
     }
     set({ aiCandidates: [] });
+
+    // Reveal the freshly committed AI nodes (and pin them in exploration mode).
+    if (pivotId) {
+      set((s) => {
+        const beforeVisible = s.explorationMode ? s.visibleEntityIds : new Set(s.entities.map((e) => e.id));
+        const newEntityIds = [...revealedEntityIds].filter((id) => !beforeVisible.has(id));
+        const nextVisible = s.explorationMode
+          ? new Set([...s.visibleEntityIds, ...revealedEntityIds])
+          : s.visibleEntityIds;
+        const grew = s.explorationMode && nextVisible.size > s.visibleEntityIds.size;
+        return {
+          visibleEntityIds: nextVisible,
+          explorationHistory: grew ? _pushHist(s.explorationHistory, s.visibleEntityIds) : s.explorationHistory,
+          revealSignal: {
+            nonce: (s.revealSignal?.nonce ?? 0) + 1,
+            pivotId,
+            resultEntityIds: [...revealedEntityIds],
+            newEntityIds,
+            relationIds: revealedRelationIds,
+          },
+        };
+      });
+    }
   },
 
   loading: false,
   setLoading: (l) => set({ loading: l }),
 
+  layoutMode: 'radial',
+  setLayoutMode: (m) => set({ layoutMode: m }),
   layoutNonce: 0,
   requestAutoLayout: () => set((s) => ({ layoutNonce: s.layoutNonce + 1 })),
   tidyUp: () => set((s) => ({
@@ -434,6 +833,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 }));
+
+const HISTORY_LIMIT = 60;
+
+/** Append a snapshot of the current visible set to the exploration history. */
+function _pushHist(history: Set<string>[], current: Set<string>): Set<string>[] {
+  return [...history, new Set(current)].slice(-HISTORY_LIMIT);
+}
+
+/** Build a reveal signal that just re-fits the camera to `ids` (no new nodes). */
+function _fitReveal(nonce: number, ids: string[], relations: Relation[]) {
+  const idSet = new Set(ids);
+  const relationIds = relations
+    .filter((r) => idSet.has(r.source_id) && idSet.has(r.target_id))
+    .map((r) => r.id);
+  return { nonce: nonce + 1, pivotId: '', resultEntityIds: ids, newEntityIds: [] as string[], relationIds };
+}
 
 /** Persist tags into Project.settings.tags and sync to backend. */
 function _persistTags(tags: Tag[], project: Project | null) {

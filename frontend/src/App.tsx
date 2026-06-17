@@ -51,6 +51,24 @@ function App() {
     window.addEventListener('mouseup', onUp);
   }, [inspectorWidth]);
 
+  // Esc → leave Transform tab (back to 详情)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const s = useAppStore.getState();
+      if (s.settingsOpen) return;
+      if (s.aiCandidates.length > 0) return;
+      if (s.inspectorTab === 'transform') {
+        e.preventDefault();
+        s.setInspectorTab('details');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
@@ -253,7 +271,7 @@ function App() {
           </span>
           <span>●&nbsp;{entities.length} 实体</span>
           <span>🔗 {relations.length} 关系</span>
-          <span style={{ marginLeft: 'auto', color: 'var(--mt-text-faint)' }}>右键节点运行 Transform · 拖拽调色盘到画布创建实体</span>
+          <span style={{ marginLeft: 'auto', color: 'var(--mt-text-faint)' }}>右键节点打开 Transform 面板 · 拖拽调色盘到画布创建实体</span>
         </div>
       </div>
 

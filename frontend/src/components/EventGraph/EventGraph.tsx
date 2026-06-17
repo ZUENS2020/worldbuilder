@@ -31,7 +31,6 @@ import '@xyflow/react/dist/style.css';
 
 import EntityNode from '../Canvas/EntityNode';
 import RelationEdge from '../Canvas/RelationEdge';
-import ContextMenu from '../ContextMenu/ContextMenu';
 import { useAppStore } from '../../stores/appStore';
 import { ENTITY_CONFIG, getRelationConfig } from '../../types';
 import type { Entity, Relation } from '../../types';
@@ -88,12 +87,29 @@ function buildEventData(
 
 export default function EventGraph() {
   const {
-    entities, relations, addRelation, setSelectedEntity, setContextMenu,
-    project, customRelationTypes,
+    entities, relations, addRelation, setSelectedEntity,
+    project, customRelationTypes, setInspectorTab, clearTransformHighlight,
   } = useAppStore();
   const rf = useReactFlow();
 
-  const nodePositions = useRef<Map<string, { x: number; y: number }>>(new Map());
+  // ── Persistent position storage (localStorage per project) ──
+  const POS_KEY = project ? `wb.event-positions.${project.id}` : '';
+  const loadPositions = (): Map<string, { x: number; y: number }> => {
+    if (!POS_KEY) return new Map();
+    try {
+      const raw = localStorage.getItem(POS_KEY);
+      if (raw) return new Map(Object.entries(JSON.parse(raw)));
+    } catch { /* corrupt data, ignore */ }
+    return new Map();
+  };
+  const savePositions = (positions: Map<string, { x: number; y: number }>) => {
+    if (!POS_KEY) return;
+    try {
+      localStorage.setItem(POS_KEY, JSON.stringify(Object.fromEntries(positions)));
+    } catch { /* quota exceeded, ignore */ }
+  };
+
+  const nodePositions = useRef<Map<string, { x: number; y: number }>>(loadPositions());
   const [layoutApplied, setLayoutApplied] = useState(false);
 
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
@@ -116,17 +132,35 @@ export default function EventGraph() {
     });
     const { edges: newEdges } = buildEventData(entities, relations, nodePositions.current, customRelationTypes);
     setEdges(newEdges);
+    savePositions(nodePositions.current);
     setLayoutApplied(false);
   }
 
-  // Auto-apply hierarchical layout on first load or data change
+  // Auto-apply layout on first load or data change — but reuse saved
+  // positions if we have them for most nodes (so reloads keep your layout).
   useEffect(() => {
     if (layoutApplied || nodes.length === 0) return;
+
+    const cached = nodePositions.current;
+    const coverage = nodes.filter((n) => cached.has(n.id)).length / nodes.length;
+
+    if (coverage > 0.5) {
+      // Enough saved positions — apply them directly, no re-layout.
+      setNodes((current) => current.map((n) => {
+        const pos = cached.get(n.id);
+        return pos ? { ...n, position: pos } : n;
+      }));
+      window.requestAnimationFrame(() => rf.fitView({ padding: 0.2, duration: 300 }));
+      setLayoutApplied(true);
+      return;
+    }
+
     (async () => {
       try {
         const laidOut = await calculateLayout(nodes, edges, 'hierarchical');
         setNodes(laidOut);
         laidOut.forEach((n) => nodePositions.current.set(n.id, n.position));
+        savePositions(nodePositions.current);
         window.requestAnimationFrame(() => rf.fitView({ padding: 0.2, duration: 300 }));
         setLayoutApplied(true);
       } catch (e) {
@@ -137,6 +171,8 @@ export default function EventGraph() {
 
   const onNodeDragStop = useCallback((_: any, node: Node) => {
     nodePositions.current.set(node.id, node.position);
+    savePositions(nodePositions.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onConnect: OnConnect = useCallback(
@@ -154,11 +190,14 @@ export default function EventGraph() {
     (event, node) => {
       event.preventDefault();
       setSelectedEntity(node.id);
-      setContextMenu({ x: event.clientX, y: event.clientY, entityId: node.id });
+      setInspectorTab('transform');
     },
-    [setSelectedEntity, setContextMenu],
+    [setSelectedEntity, setInspectorTab],
   );
-  const onPaneClick = useCallback(() => { setSelectedEntity(null); setContextMenu(null); }, [setSelectedEntity, setContextMenu]);
+  const onPaneClick = useCallback(() => {
+    setSelectedEntity(null);
+    clearTransformHighlight();
+  }, [setSelectedEntity, clearTransformHighlight]);
 
   return (
     <div style={{ width: '100%', height: '100%', background: 'var(--mt-canvas)' }}>
@@ -197,7 +236,6 @@ export default function EventGraph() {
           </div>
         </Panel>
       </ReactFlow>
-      <ContextMenu />
     </div>
   );
 }

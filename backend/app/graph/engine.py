@@ -10,6 +10,48 @@ from typing import Optional
 from app.models.models import Entity, Relation
 
 
+# ── Display-label maps (mirror frontend types/index.ts) ─────────
+ENTITY_TYPE_LABELS = {
+    "character": "人物",
+    "location": "地点",
+    "event": "事件",
+    "item": "物品",
+    "faction": "阵营",
+}
+
+RELATION_TYPE_LABELS = {
+    "ally": "盟友", "enemy": "敌对", "lover": "恋人", "family": "家族",
+    "rival": "对手", "mentor": "师徒", "subordinate": "从属", "member_of": "属于",
+    "located_at": "位于", "participated": "参与", "caused": "导致",
+    "followed_by": "随后", "holds": "持有", "owns": "拥有",
+}
+
+# Known property keys → Chinese display labels. Unknown keys are shown as-is.
+PROPERTY_KEY_LABELS = {
+    "personality": "性格", "goal": "目标", "description": "描述", "desc": "描述",
+    "time": "时间", "date": "日期", "location": "地点", "running_style": "跑法",
+    "va": "声优", "height": "身高", "age": "年龄", "gender": "性别",
+    "appearance": "外貌", "background": "背景", "occupation": "职业",
+    "alias": "别名", "title": "称号", "origin": "出身", "ability": "能力",
+    "weakness": "弱点", "motto": "口头禅", "outfit": "服装", "weapon": "武器",
+}
+# Property keys that are redundant with the entity name / internal — skip.
+_SKIP_PROP_KEYS = {"label", "name"}
+
+
+def _format_props(props: dict) -> list[str]:
+    """Render an entity's properties as ['性格: ...', '目标: ...'] lines."""
+    lines = []
+    for key, value in (props or {}).items():
+        if key in _SKIP_PROP_KEYS or value in (None, "", [], {}):
+            continue
+        label = PROPERTY_KEY_LABELS.get(key, key)
+        if isinstance(value, (list, tuple)):
+            value = "、".join(str(v) for v in value)
+        lines.append(f"  {label}: {value}")
+    return lines
+
+
 class GraphEngine:
     def __init__(self):
         # entity_id -> Entity
@@ -123,58 +165,97 @@ class GraphEngine:
             "hop_map": visited,
         }
 
-    def get_context(self, entity_ids: list[str], project_id: str, scene: str = None) -> dict:
-        """Build context for ST plugin injection.
+    def _entity_oneliner(self, entity: Entity) -> str:
+        """One-line summary for a neighbor (description or personality, truncated)."""
+        props = entity.properties or {}
+        blurb = props.get("description") or props.get("desc") or props.get("personality") or ""
+        if isinstance(blurb, (list, tuple)):
+            blurb = "、".join(str(v) for v in blurb)
+        blurb = str(blurb).replace("\n", " ").strip()
+        if len(blurb) > 40:
+            blurb = blurb[:40] + "…"
+        type_label = ENTITY_TYPE_LABELS.get(entity.type, entity.type)
+        return f"{entity.name}（{type_label}）" + (f"：{blurb}" if blurb else "")
 
-        For each entity, get 2-hop neighbors and build a text summary
-        of relationships and active warnings.
+    def get_context(
+        self,
+        entity_ids: list[str],
+        project_id: str,
+        scene: str = None,
+        *,
+        context_hop: int = 2,
+    ) -> dict:
+        """Build rich world-context text for LLM injection.
+
+        For each *selected* entity, emit a block with its full properties and
+        the relation network around it (selected ↔ selected, and N-hop
+        neighbors). Neighbors are listed as name + one-line blurb only, to keep
+        the prompt focused. Returns {system_injection, active_warnings, token_count}.
         """
-        all_entities = {}
-        all_relations = {}
+        hop = max(1, min(5, int(context_hop)))
+        selected = [eid for eid in entity_ids if eid in self.entities]
+        selected_set = set(selected)
         warnings = []
 
-        for eid in entity_ids:
-            result = self.get_neighbors(eid, hop=2, project_id=project_id)
-            for e in result["entities"]:
-                all_entities[e.id] = e
+        # Gather all relations touching the selected entities (within project).
+        rels_by_id = {}
+        neighbor_ids = set()
+        for eid in selected:
+            result = self.get_neighbors(eid, hop=hop, project_id=project_id)
             for r in result["relations"]:
-                all_relations[r.id] = r
+                rels_by_id[r.id] = r
+            for nid, h in result["hop_map"].items():
+                if nid not in selected_set:
+                    neighbor_ids.add(nid)
 
-        # Build system injection text
         lines = []
-        for eid in entity_ids:
-            entity = self.entities.get(eid)
-            if not entity:
+
+        # ── Section 1: selected entities with full properties ──
+        for eid in selected:
+            entity = self.entities[eid]
+            type_label = ENTITY_TYPE_LABELS.get(entity.type, entity.type)
+            lines.append(f"【{entity.name}（{type_label}）】")
+            prop_lines = _format_props(entity.properties or {})
+            if prop_lines:
+                lines.extend(prop_lines)
+            lines.append("")  # blank line between blocks
+
+        # ── Section 2: relation network ──
+        rel_lines = []
+        for rel in rels_by_id.values():
+            src = self.entities.get(rel.source_id)
+            tgt = self.entities.get(rel.target_id)
+            if not src or not tgt:
                 continue
+            # Only show relations that touch at least one selected entity.
+            if rel.source_id not in selected_set and rel.target_id not in selected_set:
+                continue
+            rel_label = RELATION_TYPE_LABELS.get(rel.type, rel.type)
+            desc = (rel.properties or {}).get("description", "")
+            line = f"{src.name} --[{rel_label}]--> {tgt.name}"
+            if desc:
+                line += f"（{desc}）"
+            rel_lines.append(line)
 
-            entity_rels = [r for r in all_relations.values()
-                           if r.source_id == eid or r.target_id == eid]
+            if rel.type in ("enemy", "rival") and rel.weight > 0.7:
+                warnings.append(
+                    f"{src.name}与{tgt.name}当前关系：{rel_label}（强度{rel.weight:.0%}）"
+                )
+        if rel_lines:
+            lines.append("【关系网】")
+            lines.extend(rel_lines)
+            lines.append("")
 
-            if entity.type == "character":
-                lines.append(f"【{entity.name}】")
-                # Group relations by type
-                for rel in entity_rels:
-                    other_id = rel.target_id if rel.source_id == eid else rel.source_id
-                    other = self.entities.get(other_id)
-                    if other:
-                        direction = "→" if rel.source_id == eid else "←"
-                        desc = rel.properties.get("description", "")
-                        lines.append(f"  {direction} {rel.type}: {other.name}" +
-                                     (f" ({desc})" if desc else ""))
+        # ── Section 3: related neighbors (name + blurb only) ──
+        neighbor_lines = [
+            self._entity_oneliner(self.entities[nid])
+            for nid in neighbor_ids if nid in self.entities
+        ]
+        if neighbor_lines:
+            lines.append("【相关角色/事物】")
+            lines.extend(neighbor_lines)
 
-                        # Detect potential conflicts
-                        if rel.type in ("enemy", "rival") and rel.weight > 0.7:
-                            warnings.append(f"{entity.name}与{other.name}当前关系：{rel.type}（强度{rel.weight:.0%}）")
-
-            elif entity.type == "location":
-                lines.append(f"【地点：{entity.name}】")
-                people_here = [self.entities[r.source_id if r.target_id == eid else r.target_id]
-                               for r in entity_rels if r.type == "located_at"]
-                for p in people_here:
-                    if p:
-                        lines.append(f"  在场：{p.name}")
-
-        system_injection = "\n".join(lines)
+        system_injection = "\n".join(lines).strip()
 
         return {
             "system_injection": system_injection,

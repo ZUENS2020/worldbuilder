@@ -22,6 +22,13 @@ function EntityNode({ data, selected }: NodeProps) {
   const aiInferred = !!(entity.properties as Record<string, unknown> | undefined)?.ai_inferred;
   const [hovering, setHovering] = useState(false);
 
+  // Transient reveal state set by the Canvas after a Transform:
+  //   'on'  → just surfaced by the latest Transform (pulse + emphasise)
+  //   'dim' → not part of the latest reveal (fade to background)
+  const hl = (data as { hl?: 'on' | 'dim' }).hl;
+  const isRevealed = hl === 'on';
+  const isDimmed = hl === 'dim';
+
   const isChar = entity.type === 'character';
   const isFaction = entity.type === 'faction';
   const isEvent = entity.type === 'event';
@@ -53,12 +60,22 @@ function EntityNode({ data, selected }: NodeProps) {
     <div
       style={{
         position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center',
-        transform: selected ? 'scale(1.15)' : 'scale(1)',
-        transition: 'transform 0.25s ease',
+        transform: selected || isRevealed ? 'scale(1.15)' : 'scale(1)',
+        transition: 'transform 0.25s ease, opacity 0.3s ease',
+        opacity: isDimmed ? 0.22 : 1,
+        filter: isDimmed ? 'grayscale(0.6)' : undefined,
       }}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
     >
+      {/* Reveal pulse ring (newly surfaced by a Transform) */}
+      {isRevealed && (
+        <div
+          className="wb-reveal-ring"
+          style={{ width: dim + 16, height: dim + 16, top: -8, left: '50%', marginLeft: -(dim + 16) / 2 }}
+        />
+      )}
+
       {/* Selection halo */}
       {selected && (
         <div style={{

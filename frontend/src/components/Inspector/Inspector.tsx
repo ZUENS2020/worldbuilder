@@ -4,15 +4,17 @@ import { ENTITY_CONFIG, RELATION_CONFIG, TAG_COLORS, getRelationConfig } from '.
 import type { EntityType, RelationType } from '../../types';
 import TextEditorModal from '../common/TextEditorModal';
 import Markdown from '../common/Markdown';
+import TransformPanel from '../Transform/TransformPanel';
 
 // Built-in relation type keys
 const BUILTIN_RELATION_TYPES = Object.keys(RELATION_CONFIG) as RelationType[];
 
 export default function Inspector() {
   const {
-    selectedEntityId, entities, relations, updateEntity, removeEntity,
+    selectedEntityId, selectedEntityIds, setSelectedEntities, entities, relations, updateEntity, removeEntity,
     executeTransform, addRelation, removeRelation, focusOnEntity,
     customRelationTypes, addCustomRelationType, removeCustomRelationType,
+    inspectorTab, setInspectorTab,
   } = useAppStore();
 
   const [aiLoading, setAiLoading] = useState<string | null>(null);
@@ -44,16 +46,99 @@ export default function Inspector() {
   const allRelConfig = getRelationConfig(customRelationTypes);
 
   const entity = entities.find((e) => e.id === selectedEntityId);
+  const multiSelected = selectedEntityIds.length > 1
+    ? entities.filter((e) => selectedEntityIds.includes(e.id))
+    : [];
+
+  const tabBtn = (tab: 'details' | 'transform', label: string) => (
+    <button
+      type="button"
+      className={`mt-btn${inspectorTab === tab ? ' active' : ''}`}
+      style={{ fontSize: 11, padding: '2px 10px', height: 20, fontWeight: inspectorTab === tab ? 600 : 400 }}
+      onClick={() => setInspectorTab(tab)}
+    >
+      {label}
+    </button>
+  );
+
+  const tabBar = (showBack = false) => (
+    <div className="mt-panel-title" style={{ justifyContent: 'space-between', gap: 6 }}>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        {tabBtn('details', '🔎 详情')}
+        {tabBtn('transform', '🕸️ Transform')}
+      </div>
+      {showBack && (
+        <button
+          type="button"
+          className="mt-btn"
+          style={{ fontSize: 10, padding: '1px 8px', height: 20, border: '1px solid var(--mt-border)', color: 'var(--mt-text-muted)' }}
+          onClick={() => setInspectorTab('details')}
+          title="返回详情 (Esc)"
+        >
+          ← 详情 · Esc
+        </button>
+      )}
+    </div>
+  );
+
+  if (inspectorTab === 'transform') {
+    return (
+      <div className="mt-panel" style={{ flex: 1, borderRight: 'none', borderBottom: 'none', borderTop: 'none' }}>
+        {tabBar(true)}
+        <div className="mt-panel-body" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
+          <TransformPanel />
+        </div>
+      </div>
+    );
+  }
+
+  if (multiSelected.length > 1) {
+    return (
+      <div className="mt-panel" style={{ flex: 1, borderRight: 'none', borderBottom: 'none', borderTop: 'none' }}>
+        {tabBar()}
+        <div className="mt-panel-body" style={{ padding: '12px' }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: 'var(--mt-accent-dark)' }}>
+            已选中 {multiSelected.length} 个实体
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--mt-text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
+            点击列表项查看单个实体详情；右键节点可运行 Transform（以主选节点为准）。
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: '60vh', overflowY: 'auto' }}>
+            {multiSelected.map((e) => {
+              const cfg = ENTITY_CONFIG[e.type as EntityType] || ENTITY_CONFIG.character;
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  className="mt-btn"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                    padding: '6px 8px', fontSize: 12, border: '1px solid var(--mt-border-soft)',
+                    fontWeight: e.id === selectedEntityId ? 600 : 400,
+                  }}
+                  onClick={() => setSelectedEntities([e.id])}
+                >
+                  <span style={{ fontSize: 14 }}>{cfg.icon}</span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
+                  <span style={{ fontSize: 10, color: cfg.color }}>{cfg.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!entity) {
     return (
       <div className="mt-panel" style={{ flex: 1, borderRight: 'none', borderBottom: 'none', borderTop: 'none' }}>
-        <div className="mt-panel-title">🔎 详情 · Property View</div>
+        {tabBar()}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--mt-text-muted)', fontSize: 12, textAlign: 'center', padding: 16 }}>
           <div>
             <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.5 }}>🔍</div>
             选择一个实体查看属性<br />
-            <span style={{ fontSize: 11 }}>右键节点运行 Transform</span>
+            <span style={{ fontSize: 11 }}>使用左上角框选工具多选 · 右键节点打开 Transform</span>
           </div>
         </div>
       </div>
@@ -67,6 +152,12 @@ export default function Inspector() {
     updateEntity(entity.id, { properties: { ...entity.properties, [key]: value } });
 
   const handleDelete = () => { if (confirm(`确定删除 ${entity.name}？`)) removeEntity(entity.id); };
+
+  const handleDeleteProperty = (key: string) => {
+    if (!confirm(`删除属性「${key}」？`)) return;
+    const { [key]: _removed, ...rest } = entity.properties || {};
+    updateEntity(entity.id, { properties: rest });
+  };
 
   const handleAITransform = async (type: string) => {
     setAiLoading(type);
@@ -120,7 +211,7 @@ export default function Inspector() {
 
   return (
     <div className="mt-panel" style={{ flex: 1, borderRight: 'none', borderBottom: 'none', borderTop: 'none' }}>
-      <div className="mt-panel-title">🔎 详情 · Property View</div>
+      {tabBar()}
       <div className="mt-panel-body">
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 12px 10px', borderBottom: '1px solid var(--mt-border-soft)' }}>
@@ -207,6 +298,14 @@ export default function Inspector() {
                         ⤢ 放大
                       </button>
                     )}
+                    <button
+                      className="mt-btn"
+                      style={{ fontSize: 9, padding: '0 5px', height: 16, color: '#c0392b' }}
+                      onClick={() => handleDeleteProperty(key)}
+                      title="删除属性"
+                    >
+                      ✕
+                    </button>
                   </div>
                 </div>
                 {isLong ? (

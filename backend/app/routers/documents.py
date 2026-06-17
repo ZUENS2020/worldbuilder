@@ -10,7 +10,12 @@ from app.database import get_db
 from app.models.models import Document, Project, Entity
 from app.schemas import DocumentCreate, DocumentUpdate, DocumentOut, GenerateRequest
 from app.graph.engine import graph_engine
-from app.services.ai_service import ai_generate_scene_stream, ai_generate_outline_stream
+from app.graph.hop_settings import resolve_graph_hops
+from app.services.ai_service import (
+    ai_generate_scene_stream,
+    ai_continue_scene_stream,
+    ai_generate_outline_stream,
+)
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["documents"])
 
@@ -99,23 +104,38 @@ async def generate_stream(
 
     # Build context from graph
     entity_ids = data.context_entity_ids + data.context_event_ids
-    context_result = graph_engine.get_context(entity_ids, project_id=project_id)
+    hops = resolve_graph_hops(config)
+    context_result = graph_engine.get_context(
+        entity_ids, project_id=project_id, context_hop=hops["writing_context"],
+    )
     context_text = context_result["system_injection"]
+
+    gen_kwargs = dict(
+        length=data.length, style=data.style, pov=data.pov,
+        language=data.language, instruction=data.instruction,
+    )
 
     async def event_generator():
         if data.mode == "scene":
-            async for chunk in ai_generate_scene_stream(
-                context_text, data.scene_description, config=config,
-            ):
-                # Encode newlines so SSE line-splitting doesn't eat them
-                encoded = chunk.replace("\n", "\\n")
-                yield f"data: {encoded}\n\n"
+            stream = ai_generate_scene_stream(
+                context_text, data.scene_description, config=config, **gen_kwargs,
+            )
+        elif data.mode == "continue":
+            stream = ai_continue_scene_stream(
+                context_text, data.prior_text, config=config, **gen_kwargs,
+            )
         elif data.mode == "outline":
-            async for chunk in ai_generate_outline_stream(
+            stream = ai_generate_outline_stream(
                 context_text, config=config,
-            ):
-                encoded = chunk.replace("\n", "\\n")
-                yield f"data: {encoded}\n\n"
+                style=data.style, language=data.language, instruction=data.instruction,
+            )
+        else:
+            yield "data: [DONE]\n\n"
+            return
+        async for chunk in stream:
+            # Encode newlines so SSE line-splitting doesn't eat them
+            encoded = chunk.replace("\n", "\\n")
+            yield f"data: {encoded}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

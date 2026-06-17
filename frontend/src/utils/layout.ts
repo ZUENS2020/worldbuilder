@@ -20,7 +20,7 @@ const HIERARCHICAL_OPTIONS = {
 
 const FORCE_OPTIONS = {
   'elk.algorithm': 'force',
-  'elk.spacing.nodeNode': '60',
+  'elk.spacing.nodeNode': '110',
   'elk.force.temperature': '0.001',
   'elk.force.iterations': '300',
   'elk.force.model': 'FRUCHTERMAN_REINGOLD',
@@ -81,31 +81,28 @@ export async function calculateLayout(
 }
 
 /**
- * Maltego-style radial topology: characters at the core, with their
- * connected factions/events/locations fanning out in outer rings.
+ * Maltego-style radial topology: the most-connected character (or focus)
+ * sits at the centre; every other node is placed on a concentric ring by
+ * its BFS hop distance.
  *
- * Layout strategy (character-centric):
- *   - Ring 0 (centre): the most-connected character (or selected focus)
- *   - Ring 1: other characters, arranged by shared connections
- *   - Ring 2: factions, events, locations connected to ring-1 characters
- *
- * Characters in the same faction are grouped into angular wedges so
- * their affiliated faction node sits behind them (like a fan).
+ * Two ideas keep it clean even with many nodes:
+ *   1. Adaptive ring radius — a ring's radius grows with how many nodes it
+ *      holds, so adjacent nodes always keep an arc length ≥ MIN_ARC. This
+ *      removes overlaps by construction (no post-hoc shoving needed).
+ *   2. Barycentre ordering — ring by ring, nodes are ordered by the mean
+ *      angle of their already-placed neighbours in the inner ring, so
+ *      children sit near their parents and edge crossings drop sharply.
  */
 const RING_GAP = 260;
+const MIN_ARC = 160; // minimum arc length (centre-to-centre) between ring neighbours
 const CENTER = { x: 800, y: 600 };
 
 export function radialLayout(nodes: Node[], edges: Edge[], focusId?: string): Node[] {
   if (nodes.length === 0) return nodes;
   if (nodes.length === 1) return [{ ...nodes[0], position: { ...CENTER } }];
 
-  // Categorise nodes by type
-  const byId = new Map<string, Node>();
   const typeOf = new Map<string, string>();
-  nodes.forEach((n) => {
-    byId.set(n.id, n);
-    typeOf.set(n.id, (n.data?.entity as any)?.type || 'character');
-  });
+  nodes.forEach((n) => typeOf.set(n.id, (n.data?.entity as any)?.type || 'character'));
 
   // Build adjacency (undirected)
   const adj = new Map<string, string[]>();
@@ -117,8 +114,7 @@ export function radialLayout(nodes: Node[], edges: Edge[], focusId?: string): No
     }
   });
 
-  // ── Step 1: Pick the central character ──
-  // Prefer explicit focus, else the most-connected character.
+  // ── Step 1: Pick the central node (focus, else most-connected character) ──
   let root: string | undefined;
   if (focusId && adj.has(focusId)) {
     root = focusId;
@@ -130,7 +126,6 @@ export function radialLayout(nodes: Node[], edges: Edge[], focusId?: string): No
       if (d > best) { best = d; root = n.id; }
     }
   }
-  // Fallback: most connected node of any type
   if (!root) {
     let best = -1;
     for (const n of nodes) {
@@ -140,172 +135,221 @@ export function radialLayout(nodes: Node[], edges: Edge[], focusId?: string): No
   }
   if (!root) root = nodes[0].id;
 
-  // ── Step 2: BFS to assign hop levels (character-centric) ──
-  // Characters go to ring 1, their non-character neighbours to ring 2.
-  const level = new Map<string, number>();
-  const parent = new Map<string, string>();
+  // ── Step 2: BFS hop levels → ring number ──
+  // Characters keep their BFS hop; non-characters are pushed one ring out so
+  // events/locations/factions never share a ring with the characters they hang off.
+  const ring = new Map<string, number>();
   const visited = new Set<string>([root]);
-  level.set(root, 0);
+  ring.set(root, 0);
 
   const queue = [root];
   while (queue.length) {
     const u = queue.shift()!;
-    const uLevel = level.get(u)!;
-    const uType = typeOf.get(u);
-
-    // Sort neighbours: characters first (so they stay in inner rings)
-    const neighbours = adj.get(u)!;
-    const sorted = [...neighbours].sort((a, b) => {
+    const uRing = ring.get(u)!;
+    // Characters first so they settle into the inner rings.
+    const sorted = [...adj.get(u)!].sort((a, b) => {
       const ta = typeOf.get(a), tb = typeOf.get(b);
       if (ta === 'character' && tb !== 'character') return -1;
       if (ta !== 'character' && tb === 'character') return 1;
       return 0;
     });
-
     for (const v of sorted) {
       if (visited.has(v)) continue;
       visited.add(v);
-      parent.set(v, u);
-
-      const vType = typeOf.get(v);
-      // Characters at same or next ring, non-characters pushed one ring further
-      if (vType === 'character') {
-        level.set(v, uLevel + 1);
-      } else {
-        level.set(v, Math.max(uLevel + 1, uLevel + 2));
-        // Simplify: faction/event/location always 1 ring further than their character
-        if (uType === 'character') {
-          level.set(v, uLevel + 2);
-        }
-      }
+      const vRing = typeOf.get(v) === 'character' ? uRing + 1 : uRing + 2;
+      ring.set(v, Math.max(1, vRing));
       queue.push(v);
     }
   }
-
-  // Disconnected nodes: attach to root at ring 2
+  // Disconnected nodes go to an outer ring.
+  let maxRing = 0;
+  ring.forEach((r) => { if (r > maxRing) maxRing = r; });
   for (const n of nodes) {
-    if (!visited.has(n.id)) {
-      visited.add(n.id);
-      level.set(n.id, 2);
-      parent.set(n.id, root);
-    }
+    if (!visited.has(n.id)) { ring.set(n.id, maxRing + 1); visited.add(n.id); }
   }
 
-  // ── Step 3: Group characters by faction (angular wedges) ──
-  // Find faction membership for each character
-  const charFaction = new Map<string, string>(); // charId -> factionId
-  edges.forEach((e) => {
-    const sType = typeOf.get(e.source), tType = typeOf.get(e.target);
-    if (sType === 'character' && tType === 'faction') charFaction.set(e.source, e.target);
-    if (tType === 'character' && sType === 'faction') charFaction.set(e.target, e.source);
-  });
-
-  // Group ring-1 characters by faction
-  const ring1Chars = nodes.filter((n) => level.get(n.id) === 1 && typeOf.get(n.id) === 'character');
-  const factionGroups = new Map<string, string[]>(); // factionId -> [charIds]
-  const noFaction: string[] = [];
-  for (const c of ring1Chars) {
-    const f = charFaction.get(c.id);
-    if (f) {
-      factionGroups.set(f, [...(factionGroups.get(f) || []), c.id]);
-    } else {
-      noFaction.push(c.id);
-    }
+  // ── Step 3: Bucket nodes by ring ──
+  const ringBuckets = new Map<number, string[]>();
+  for (const n of nodes) {
+    if (n.id === root) continue;
+    const r = ring.get(n.id) ?? 1;
+    if (!ringBuckets.has(r)) ringBuckets.set(r, []);
+    ringBuckets.get(r)!.push(n.id);
   }
 
-  // ── Step 4: Assign angles ──
+  // ── Step 4 & 5: order each ring by neighbour barycentre, place on circle ──
   const angle = new Map<string, number>();
-
-  // Root at centre (angle irrelevant)
   angle.set(root, 0);
+  const radiusOf = new Map<string, number>();
 
-  // Allocate angular wedges: each faction group gets a wedge, ungrouped chars fill gaps
-  const allGroups: { id: string; members: string[]; isFaction: boolean }[] = [];
-  for (const [fid, members] of factionGroups) {
-    allGroups.push({ id: fid, members, isFaction: true });
-  }
-  if (noFaction.length > 0) {
-    allGroups.push({ id: '_none', members: noFaction, isFaction: false });
-  }
+  const sortedRings = [...ringBuckets.keys()].sort((a, b) => a - b);
+  for (const r of sortedRings) {
+    const ids = ringBuckets.get(r)!;
+    // Barycentre = mean angle of already-placed neighbours (inner rings/root).
+    const bary = (id: string): number => {
+      const placed = adj.get(id)!.filter((m) => angle.has(m));
+      if (placed.length === 0) return Number.POSITIVE_INFINITY; // unanchored → end
+      // Average on the unit circle to handle wraparound correctly.
+      let sx = 0, sy = 0;
+      for (const m of placed) { sx += Math.cos(angle.get(m)!); sy += Math.sin(angle.get(m)!); }
+      return Math.atan2(sy, sx);
+    };
+    const ordered = ids
+      .map((id) => ({ id, key: bary(id) }))
+      .sort((a, b) => a.key - b.key)
+      .map((x) => x.id);
 
-  const totalWeight = allGroups.reduce((s, g) => s + g.members.length, 0) || 1;
-  let currentAngle = 0;
-
-  for (const group of allGroups) {
-    const wedge = (2 * Math.PI * group.members.length) / totalWeight;
-    const perMember = wedge / group.members.length;
-
-    for (let i = 0; i < group.members.length; i++) {
-      const a = currentAngle + perMember * (i + 0.5);
-      angle.set(group.members[i], a);
-    }
-
-    // Place the faction node at the centre of its wedge (one ring further)
-    if (group.isFaction) {
-      angle.set(group.id, currentAngle + wedge / 2);
-    }
-
-    currentAngle += wedge;
-  }
-
-  // For ring-2+ non-character nodes not yet assigned: place near their parent
-  // Faction nodes go to ring 2, events/locations to ring 3 — different rings avoid overlap
-  for (const n of nodes) {
-    if (angle.has(n.id)) continue;
-    const p = parent.get(n.id);
-    if (p && angle.has(p)) {
-      // Collect siblings that share the same parent and aren't yet assigned
-      const siblings = nodes.filter((s) => parent.get(s.id) === p && !angle.has(s.id));
-      const idx = siblings.indexOf(n);
-      const base = angle.get(p)!;
-      // Spread angle proportional to sibling count: at least 0.5 rad per sibling
-      const perSibling = Math.max(0.25, Math.PI / Math.max(siblings.length, 1));
-      const totalSpread = perSibling * siblings.length;
-      const offset = siblings.length > 1
-        ? -totalSpread / 2 + (totalSpread * idx) / (siblings.length - 1)
-        : 0;
-      angle.set(n.id, base + offset);
-
-      // Factions on ring 2, events/locations on ring 3
-      const nType = typeOf.get(n.id);
-      if (nType === 'faction') {
-        level.set(n.id, Math.max(level.get(n.id) ?? 2, 2));
-      } else if (nType === 'event' || nType === 'location') {
-        level.set(n.id, Math.max(level.get(n.id) ?? 2, 3));
-      }
-    } else {
-      // Fallback: even distribution
-      const unassigned = nodes.filter((s) => !angle.has(s.id));
-      const idx = unassigned.indexOf(n);
-      angle.set(n.id, (2 * Math.PI * idx) / Math.max(unassigned.length, 1));
-    }
+    // Adaptive radius: enough circumference to give each node ≥ MIN_ARC of arc.
+    const minCircumference = ordered.length * MIN_ARC;
+    const radius = Math.max(r * RING_GAP, minCircumference / (2 * Math.PI));
+    const step = (2 * Math.PI) / ordered.length;
+    ordered.forEach((id, i) => {
+      angle.set(id, i * step);
+      radiusOf.set(id, radius);
+    });
   }
 
-  // ── Step 5: Compute positions ──
+  // ── Step 6: Compute positions ──
   const positioned = nodes.map((n) => {
-    const lvl = level.get(n.id) ?? 1;
+    if (n.id === root) return { ...n, position: { ...CENTER } };
     const ang = angle.get(n.id) ?? 0;
-    if (lvl === 0) return { ...n, position: { ...CENTER } };
-    // Non-characters at same logical level get pushed one ring further
-    const ring = typeOf.get(n.id) === 'character' ? lvl : Math.max(lvl, lvl + 0.5);
+    const radius = radiusOf.get(n.id) ?? (ring.get(n.id) ?? 1) * RING_GAP;
     return {
       ...n,
       position: {
-        x: CENTER.x + ring * RING_GAP * Math.cos(ang),
-        y: CENTER.y + ring * RING_GAP * Math.sin(ang),
+        x: CENTER.x + radius * Math.cos(ang),
+        y: CENTER.y + radius * Math.sin(ang),
       },
     };
   });
 
-  // ── Step 6: Resolve overlaps ──
-  // Push apart any nodes whose bounding boxes overlap.
-  // Characters need ~130px clearance (62px circle + label), others ~80px.
-  return resolveOverlaps(positioned);
+  // Light overlap pass as a safety net (adaptive radius already avoids most).
+  return resolveOverlaps(positioned, 3);
+}
+
+/**
+ * Place a batch of newly-revealed nodes on concentric rings around a pivot
+ * position (Maltego-style "Transform expands outward"). Existing occupied
+ * positions are taken into account so freshly placed nodes avoid overlapping
+ * what is already on the canvas.
+ *
+ * Returns a map of nodeId → position for the new nodes only.
+ */
+// Minimum centre-to-centre distance that keeps a node circle + its label pill
+// from visually overlapping its neighbour.
+const NODE_FOOTPRINT = 185;
+
+export function placeAroundPivot(
+  pivot: { x: number; y: number },
+  newIds: string[],
+  occupied: { x: number; y: number }[] = [],
+): Map<string, { x: number; y: number }> {
+  const result = new Map<string, { x: number; y: number }>();
+  if (newIds.length === 0) return result;
+
+  const GAP = NODE_FOOTPRINT;
+  // Start far enough out that the first ring clears the pivot itself, and grow
+  // when the pivot already has occupied neighbours crowding the inner space.
+  const nearPivot = occupied.filter((o) => {
+    const dx = o.x - pivot.x, dy = o.y - pivot.y;
+    return Math.sqrt(dx * dx + dy * dy) < GAP * 2.2;
+  }).length;
+  const FIRST_RING = GAP + 40 + nearPivot * 12;
+  const RING_STEP = GAP + 20;
+
+  // Distribute ids across rings; each ring holds as many as fit at GAP spacing.
+  let placed = 0;
+  let ring = 1;
+  // Rotate the start angle per call so successive expansions don't align.
+  const baseAngle = (occupied.length % 16) * (Math.PI / 8);
+
+  while (placed < newIds.length) {
+    const radius = FIRST_RING + (ring - 1) * RING_STEP;
+    const capacity = Math.max(1, Math.floor((2 * Math.PI * radius) / GAP));
+    const count = Math.min(capacity, newIds.length - placed);
+    const step = (2 * Math.PI) / count;
+    for (let i = 0; i < count; i++) {
+      const ang = baseAngle + i * step + (ring % 2) * (step / 2);
+      result.set(newIds[placed + i], {
+        x: pivot.x + radius * Math.cos(ang),
+        y: pivot.y + radius * Math.sin(ang),
+      });
+    }
+    placed += count;
+    ring++;
+  }
+
+  const newPos = newIds.map((id) => ({ id, position: { ...result.get(id)! } }));
+
+  // ── Phase 1: spring relaxation (new repel new + occupied; new ones move) ──
+  for (let pass = 0; pass < 24; pass++) {
+    let moved = false;
+    for (let i = 0; i < newPos.length; i++) {
+      const a = newPos[i];
+      for (let j = i + 1; j < newPos.length; j++) {
+        const b = newPos[j];
+        const dx = a.position.x - b.position.x;
+        const dy = a.position.y - b.position.y;
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (d < GAP) {
+          moved = true;
+          const push = (GAP - d) / 2 + 1;
+          const ux = dx / d, uy = dy / d;
+          a.position = { x: a.position.x + ux * push, y: a.position.y + uy * push };
+          b.position = { x: b.position.x - ux * push, y: b.position.y - uy * push };
+        }
+      }
+      for (const o of occupied) {
+        const dx = a.position.x - o.x;
+        const dy = a.position.y - o.y;
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (d < GAP) {
+          moved = true;
+          const push = (GAP - d) + 1;
+          const ux = dx / d, uy = dy / d;
+          a.position = { x: a.position.x + ux * push, y: a.position.y + uy * push };
+        }
+      }
+    }
+    if (!moved) break;
+  }
+
+  // ── Phase 2: deterministic outward escape — guarantees no overlaps remain ──
+  // For any new node still colliding, slide it straight outward from the pivot
+  // (where there is always free space) until it clears everything.
+  const collides = (p: { x: number; y: number }, self: number): boolean => {
+    for (const o of occupied) {
+      const dx = p.x - o.x, dy = p.y - o.y;
+      if (Math.sqrt(dx * dx + dy * dy) < GAP) return true;
+    }
+    for (let k = 0; k < newPos.length; k++) {
+      if (k === self) continue;
+      const dx = p.x - newPos[k].position.x, dy = p.y - newPos[k].position.y;
+      if (Math.sqrt(dx * dx + dy * dy) < GAP) return true;
+    }
+    return false;
+  };
+  for (let i = 0; i < newPos.length; i++) {
+    const a = newPos[i];
+    let dirX = a.position.x - pivot.x;
+    let dirY = a.position.y - pivot.y;
+    let dist = Math.sqrt(dirX * dirX + dirY * dirY) || 1;
+    dirX /= dist; dirY /= dist;
+    let guard = 0;
+    while (collides(a.position, i) && guard < 60) {
+      a.position = { x: a.position.x + dirX * (GAP * 0.5), y: a.position.y + dirY * (GAP * 0.5) };
+      guard++;
+    }
+  }
+
+  newPos.forEach((n) => result.set(n.id, n.position));
+  return result;
 }
 
 /**
  * Iterative overlap resolution: for each pair of nodes that are too close,
  * push them apart along the line connecting them. Runs a few passes.
+ * With the adaptive-radius radial layout this is just a final safety net.
  */
 function resolveOverlaps(nodes: Node[], passes = 8): Node[] {
   const MIN_GAP = 150; // minimum centre-to-centre distance (node + label pill)

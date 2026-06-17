@@ -1,0 +1,29 @@
+# WorldBuilder — production compose.
+# Frontend (nginx) is the only published service; it serves the static
+# bundle and reverse-proxies /api to the backend over the internal network.
+#
+# Public entry: http://<host>:8090  → wire your reverse proxy / Cloudflare
+# Tunnel hostname (necnovel.zuens2020.work) to this port.
+
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./.env            # provides OPENROUTER_API_KEY (and optional overrides)
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/worldbuilder.db
+      - AI_ENDPOINT=${AI_ENDPOINT:-https://openrouter.ai/api/v1}
+      - AI_MODEL=${AI_MODEL:-deepseek/deepseek-v4-flash}
+    volumes:
+      - ./data:/data       # SQLite DB persists here (seeded with existing data)
+    expose:
+      - "8000"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8090:80"

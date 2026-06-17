@@ -23,6 +23,12 @@ function RelationEdge({
   const allConfig = getRelationConfig(customRelationTypes);
   const config = allConfig[relType] || { color: '#666', style: 'solid', label: relType };
 
+  // Transient reveal state (mirrors EntityNode): emphasise edges surfaced by
+  // the latest Transform, fade the rest.
+  const hl = (data as { hl?: 'on' | 'dim' } | undefined)?.hl;
+  const isRevealed = hl === 'on';
+  const isDimmed = hl === 'dim';
+
   // Determine edge category by the types of connected nodes
   // (We use a heuristic: "member_of" and "located_at" are infrastructure links)
   const isInfraLink = relType === 'located_at';
@@ -41,7 +47,7 @@ function RelationEdge({
           ? 1.2
           : 0.8;  // located_at: faintest
 
-  const opacity = selected
+  let opacity = selected
     ? 1
     : isInfraLink
       ? 0.3
@@ -50,6 +56,15 @@ function RelationEdge({
         : isAffilLink
           ? 0.65
           : 0.85;
+  if (isRevealed) opacity = 1;
+  else if (isDimmed) opacity = 0.1;
+
+  const edgeColor = config.color;
+  const lineWidth = isRevealed
+    ? Math.max(strokeWidth + 1.2, 3)
+    : selected
+      ? 3
+      : strokeWidth;
 
   // Dash pattern
   let strokeDasharray: string | undefined;
@@ -61,19 +76,33 @@ function RelationEdge({
   const [edgePath] = getStraightPath({ sourceX, sourceY, targetX, targetY });
 
   // Only show label for character links or selected; infrastructure links hide labels
-  const showLabel = isCharLink || isAffilLink || selected;
+  const showLabel = isCharLink || isAffilLink || selected || isRevealed;
 
   return (
     <>
+      {/* Soft glow under expanded edges — keeps the type colour, adds emphasis */}
+      {isRevealed && (
+        <BaseEdge
+          id={`${id}-glow`}
+          path={edgePath}
+          style={{
+            stroke: edgeColor,
+            strokeWidth: lineWidth + 5,
+            strokeDasharray,
+            opacity: 0.22,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
       <BaseEdge
         id={id}
         path={edgePath}
         style={{
-          stroke: selected ? 'var(--mt-accent)' : config.color,
-          strokeWidth,
+          stroke: selected ? 'var(--mt-accent)' : edgeColor,
+          strokeWidth: lineWidth,
           strokeDasharray,
           opacity,
-          transition: 'opacity 0.15s, stroke-width 0.15s',
+          transition: 'opacity 0.25s, stroke-width 0.2s',
         }}
       />
       {showLabel && (
@@ -82,13 +111,13 @@ function RelationEdge({
           y={(sourceY + targetY) / 2 - 6}
           textAnchor="middle"
           dominantBaseline="central"
-          fontSize={isCharLink ? 10 : 9}
-          fontWeight={isCharLink ? 600 : 400}
-          fill={selected ? 'var(--mt-accent)' : config.color}
+          fontSize={isCharLink || isRevealed ? 10 : 9}
+          fontWeight={isRevealed || isCharLink ? 700 : 400}
+          fill={selected ? 'var(--mt-accent)' : edgeColor}
           stroke="#ffffff"
           strokeWidth={3}
           paintOrder="stroke"
-          opacity={selected ? 1 : isCharLink ? 0.9 : 0.7}
+          opacity={isDimmed ? 0.15 : isRevealed || selected ? 1 : isCharLink ? 0.9 : 0.7}
           style={{ pointerEvents: 'none' }}
         >
           {config.label}

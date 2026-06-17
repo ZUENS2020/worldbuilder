@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models.models import Entity, Relation, Project
 from app.schemas import TransformRequest, TransformResult
 from app.graph.engine import graph_engine
+from app.graph.hop_settings import resolve_graph_hops
 from app.services.ai_service import ai_infer_relations, ai_detect_conflicts, ai_generate_backstory
 
 router = APIRouter(prefix="/api/projects/{project_id}/transforms", tags=["transforms"])
@@ -82,33 +83,33 @@ async def execute_transform(
 
     # --- Graph-based transforms (no AI) ---
     if transform_type == "expand_relations":
-        return await _expand_by_relation_type(db, entity, project_id, ["ally", "enemy", "lover", "family", "rival", "mentor", "subordinate"])
+        return await _expand_by_relation_type(db, entity, project_id, config, ["ally", "enemy", "lover", "family", "rival", "mentor", "subordinate"])
     elif transform_type == "expand_events":
-        return await _expand_by_relation_type(db, entity, project_id, ["participated"])
+        return await _expand_by_relation_type(db, entity, project_id, config, ["participated"])
     elif transform_type == "expand_locations":
-        return await _expand_by_relation_type(db, entity, project_id, ["located_at"])
+        return await _expand_by_relation_type(db, entity, project_id, config, ["located_at"])
     elif transform_type == "expand_people":
-        return await _expand_by_relation_type(db, entity, project_id, ["located_at", "member_of"])
+        return await _expand_by_relation_type(db, entity, project_id, config, ["located_at", "member_of"])
     elif transform_type == "expand_participants":
-        return await _expand_by_relation_type(db, entity, project_id, ["participated"])
+        return await _expand_by_relation_type(db, entity, project_id, config, ["participated"])
     elif transform_type == "expand_related_events":
-        return await _expand_by_relation_type(db, entity, project_id, ["caused", "followed_by"])
+        return await _expand_by_relation_type(db, entity, project_id, config, ["caused", "followed_by"])
     elif transform_type == "expand_holders":
-        return await _expand_by_relation_type(db, entity, project_id, ["holds", "owns"])
+        return await _expand_by_relation_type(db, entity, project_id, config, ["holds", "owns"])
     elif transform_type == "expand_members":
-        return await _expand_by_relation_type(db, entity, project_id, ["member_of"])
+        return await _expand_by_relation_type(db, entity, project_id, config, ["member_of"])
     elif transform_type == "expand_allies":
-        return await _expand_by_relation_type(db, entity, project_id, ["ally"])
+        return await _expand_by_relation_type(db, entity, project_id, config, ["ally"])
     elif transform_type == "expand_enemies":
-        return await _expand_by_relation_type(db, entity, project_id, ["enemy"])
+        return await _expand_by_relation_type(db, entity, project_id, config, ["enemy"])
     elif transform_type == "find_enemies":
-        return await _find_enemy_chain(db, entity, project_id)
+        return await _find_enemy_chain(db, entity, project_id, config)
 
     # --- AI transforms ---
     elif transform_type == "ai_infer":
         return await _ai_infer_preview(db, entity, project_id, config)
     elif transform_type == "ai_conflict":
-        return await _ai_conflict(entity, config)
+        return await _ai_conflict(db, entity, project_id, config)
     elif transform_type == "ai_backstory":
         return await _ai_backstory(db, entity, project_id, config)
 
@@ -119,9 +120,10 @@ async def execute_transform(
 # ── Graph-based transforms ──────────────────────────────────────
 
 async def _expand_by_relation_type(
-    db: AsyncSession, entity: Entity, project_id: str, relation_types: list[str],
+    db: AsyncSession, entity: Entity, project_id: str, settings: dict, relation_types: list[str],
 ) -> TransformResult:
-    result = graph_engine.get_neighbors(entity.id, hop=1, project_id=project_id)
+    hops = resolve_graph_hops(settings)
+    result = graph_engine.get_neighbors(entity.id, hop=hops["transform_expand"], project_id=project_id)
     filtered_entities = []
     filtered_relations = []
     seen_entity_ids = {entity.id}
@@ -142,9 +144,10 @@ async def _expand_by_relation_type(
 
 
 async def _find_enemy_chain(
-    db: AsyncSession, entity: Entity, project_id: str,
+    db: AsyncSession, entity: Entity, project_id: str, settings: dict,
 ) -> TransformResult:
-    result = graph_engine.get_neighbors(entity.id, hop=2, project_id=project_id)
+    hops = resolve_graph_hops(settings)
+    result = graph_engine.get_neighbors(entity.id, hop=hops["transform_enemy"], project_id=project_id)
     enemies = set()
     for r in result["relations"]:
         if r.type == "enemy":
@@ -152,7 +155,9 @@ async def _find_enemy_chain(
 
     enemy_of_enemies = set()
     for enemy_id in enemies:
-        enemy_result = graph_engine.get_neighbors(enemy_id, hop=1, project_id=project_id)
+        enemy_result = graph_engine.get_neighbors(
+            enemy_id, hop=hops["transform_expand"], project_id=project_id,
+        )
         for r in enemy_result["relations"]:
             if r.type == "enemy":
                 other_id = r.target_id if r.source_id == enemy_id else r.source_id
@@ -184,7 +189,8 @@ async def _ai_infer_preview(
     Frontend shows AISuggestionReview for user to select/edit, then
     commits selected candidates via normal entity/relation create APIs.
     """
-    result = graph_engine.get_neighbors(entity.id, hop=1, project_id=project_id)
+    hops = resolve_graph_hops(config)
+    result = graph_engine.get_neighbors(entity.id, hop=hops["ai_context"], project_id=project_id)
     known_relations = []
     for r in result["relations"]:
         known_relations.append({
@@ -239,8 +245,11 @@ async def _ai_infer_preview(
     )
 
 
-async def _ai_conflict(entity: Entity, config: dict) -> TransformResult:
-    result = graph_engine.get_neighbors(entity.id, hop=1)
+async def _ai_conflict(
+    db: AsyncSession, entity: Entity, project_id: str, config: dict,
+) -> TransformResult:
+    hops = resolve_graph_hops(config)
+    result = graph_engine.get_neighbors(entity.id, hop=hops["ai_context"], project_id=project_id)
     relations = []
     for r in result["relations"]:
         relations.append({
@@ -270,7 +279,8 @@ async def _ai_conflict(entity: Entity, config: dict) -> TransformResult:
 async def _ai_backstory(
     db: AsyncSession, entity: Entity, project_id: str, config: dict,
 ) -> TransformResult:
-    result = graph_engine.get_neighbors(entity.id, hop=1, project_id=project_id)
+    hops = resolve_graph_hops(config)
+    result = graph_engine.get_neighbors(entity.id, hop=hops["ai_context"], project_id=project_id)
     relations = []
     for r in result["relations"]:
         relations.append({

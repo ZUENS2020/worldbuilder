@@ -4,7 +4,7 @@ import { ENTITY_CONFIG } from '../../types';
 import type { Entity } from '../../types';
 
 export default function Timeline() {
-  const { entities, relations, setSelectedEntity, selectedEntityId } = useAppStore();
+  const { entities, relations, setSelectedEntity, selectedEntityIds } = useAppStore();
 
   // Get events sorted by time
   const events = useMemo(() => {
@@ -20,6 +20,7 @@ export default function Timeline() {
   // and multiple relation types that imply participation
   const PARTICIPANT_TYPES = ['participated', 'caused', 'member_of'];
   const getParticipants = (eventId: string) => {
+    const seen = new Set<string>();
     return relations
       .filter((r) => {
         if (r.target_id !== eventId && r.source_id !== eventId) return false;
@@ -30,6 +31,10 @@ export default function Timeline() {
         const participantId = r.target_id === eventId ? r.source_id : r.target_id;
         const entity = entities.find((e) => e.id === participantId);
         if (!entity) return null;
+        // A hub entity can link to the same event via several participation
+        // relations; show it once so React keys stay unique.
+        if (seen.has(entity.id)) return null;
+        seen.add(entity.id);
         const role = r.properties?.result || r.properties?.role || r.properties?.description || '';
         return { ...entity, role };
       })
@@ -74,7 +79,7 @@ export default function Timeline() {
               const config = ENTITY_CONFIG[entity.type] || ENTITY_CONFIG.event;
               const time = entity.properties?.time || entity.properties?.date || entity.properties?.year || '?';
               const participants = entity.type === 'event' ? getParticipants(entity.id) : [];
-              const isSelected = selectedEntityId === entity.id;
+              const isSelected = selectedEntityIds.includes(entity.id);
 
               return (
                 <div key={entity.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 120 }}>

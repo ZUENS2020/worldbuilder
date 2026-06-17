@@ -10,18 +10,31 @@ import Markdown from '../common/Markdown';
 import { useTextHistory } from '../../hooks/useTextHistory';
 import { useAppStore } from '../../stores/appStore';
 import { api } from '../../services/api';
-import { ENTITY_CONFIG } from '../../types';
+import { ENTITY_CONFIG, getGraphHops } from '../../types';
 import type { EntityType } from '../../types';
 
-type GenMode = 'scene' | 'outline';
+type GenMode = 'scene' | 'outline' | 'continue';
 type ViewMode = 'edit' | 'preview' | 'split';
+type Length = 'short' | 'medium' | 'long';
+type Pov = 'first' | 'third' | 'omniscient';
+type Lang = 'zh' | 'en';
 
 export default function WritingWorkspace() {
-  const { entities, project, documents, loadDocuments, addDocument, setViewMode: setAppViewMode } = useAppStore();
+  const {
+    entities, project, documents, selectedEntityId,
+    loadDocuments, addDocument, removeDocument, updateDocument,
+    setViewMode: setAppViewMode,
+  } = useAppStore();
+  const writingHop = getGraphHops(project).writing_context;
   const [mode, setMode] = useState<GenMode>('scene');
   const [editView, setEditView] = useState<ViewMode>('split');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [sceneDesc, setSceneDesc] = useState('');
+  // Generation controls
+  const [length, setLength] = useState<Length>('medium');
+  const [pov, setPov] = useState<Pov>('third');
+  const [style, setStyle] = useState('');
+  const [language, setLanguage] = useState<Lang>('zh');
   const gen = useTextHistory('');
   const generated = gen.value;
   const [streaming, setStreaming] = useState(false);
@@ -57,12 +70,38 @@ export default function WritingWorkspace() {
     );
   };
 
+  // ── Source-selection helpers (Part D) ──
+  const allIds = useMemo(() => entities.map((e) => e.id), [entities]);
+  const selectAll = () => setSelectedIds(allIds);
+  const clearAll = () => setSelectedIds([]);
+  const toggleType = (t: EntityType) => {
+    const ids = (entitiesByType[t] || []).map((e) => e.id);
+    const allOn = ids.length > 0 && ids.every((id) => selectedIds.includes(id));
+    setSelectedIds((prev) =>
+      allOn ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])]
+    );
+  };
+  // Pull the node currently selected in the main graph into the source list.
+  const importFromGraph = () => {
+    if (!selectedEntityId) return;
+    setSelectedIds((prev) =>
+      prev.includes(selectedEntityId) ? prev : [...prev, selectedEntityId]
+    );
+  };
+
   const handleGenerate = useCallback(async () => {
-    if (!project || selectedIds.length === 0) return;
+    if (!project) return;
+    const isContinue = mode === 'continue';
+    if (!isContinue && selectedIds.length === 0) return;
+    if (isContinue && !gen.value.trim()) return;
+
     setStreaming(true);
     setViewingDocId(null);
-    gen.reset('');
-    genRef.current = '';
+
+    // Continue: keep existing prose and append; otherwise start fresh.
+    const priorText = isContinue ? gen.value : '';
+    genRef.current = isContinue ? gen.value + '\n\n' : '';
+    if (!isContinue) gen.reset('');
 
     try {
       await api.generateStream(
@@ -74,6 +113,8 @@ export default function WritingWorkspace() {
             entities.find((e) => e.id === id && e.type === 'event')
           ),
           scene_description: sceneDesc,
+          length, style, pov, language,
+          prior_text: priorText,
         },
         (chunk) => {
           genRef.current += chunk;
@@ -86,17 +127,19 @@ export default function WritingWorkspace() {
       gen.reset(`**错误**: ${e.message}`);
     }
     setStreaming(false);
-  }, [project, selectedIds, mode, sceneDesc, entities, gen]);
+  }, [project, selectedIds, mode, sceneDesc, length, style, pov, language, entities, gen]);
 
   const handleSave = async () => {
     if (!project || !generated) return;
+    const autoTitle = mode === 'outline'
+      ? '大纲'
+      : `场景: ${selectedIds.map((id) => entities.find((e) => e.id === id)?.name).filter(Boolean).join(', ') || '未命名'}`;
+    const title = prompt('文稿标题：', autoTitle);
+    if (title === null) return; // user cancelled
     setSaving(true);
-    const title = mode === 'scene'
-      ? `场景: ${selectedIds.map((id) => entities.find((e) => e.id === id)?.name).filter(Boolean).join(', ')}`
-      : `大纲`;
     await addDocument({
-      title,
-      kind: mode === 'scene' ? 'scene' : 'outline',
+      title: title.trim() || autoTitle,
+      kind: mode === 'outline' ? 'outline' : 'scene',
       content: generated,
       refs: { entity_ids: selectedIds },
     });
@@ -104,13 +147,48 @@ export default function WritingWorkspace() {
     gen.reset('');
   };
 
+  // Update the currently-viewed saved doc with edited content.
+  const handleUpdateDoc = async () => {
+    if (!viewingDocId) return;
+    setSaving(true);
+    await updateDocument(viewingDocId, { content: generated });
+    setSaving(false);
+  };
+
+  // Rename a saved doc in place.
+  const handleRename = async (doc: { id: string; title: string }) => {
+    const title = prompt('重命名文稿：', doc.title);
+    if (title === null || !title.trim() || title === doc.title) return;
+    await updateDocument(doc.id, { title: title.trim() });
+  };
+
+  // Export content as a .md file (pure client-side).
+  const exportMd = (title: string, content: string) => {
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title.replace(/[\\/:*?"<>|]/g, '_') || 'document'}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Saved documents
   const savedDocs = useMemo(() => {
-    return documents.filter((d) => d.kind === mode || mode === 'scene');
+    return documents.filter((d) => d.kind === mode || mode === 'scene' || mode === 'continue');
   }, [documents, mode]);
 
   const viewingDoc = viewingDocId ? documents.find((d) => d.id === viewingDocId) : null;
-  const displayContent = viewingDoc ? viewingDoc.content : generated;
+  // When viewing a saved doc, the editor edits a working copy (gen) seeded from it.
+  const displayContent = generated || (viewingDoc ? viewingDoc.content : '');
+  // True once the user has edited the viewed doc away from its stored content.
+  const docDirty = !!viewingDoc && generated !== viewingDoc.content;
+
+  // Generate button label + disabled state per mode.
+  const genVerb = mode === 'outline' ? '生成大纲' : mode === 'continue' ? '续写' : '生成场景正文';
+  const genDisabled = streaming || (mode === 'continue'
+    ? !generated.trim()
+    : selectedIds.length === 0);
 
   return (
     <div style={{
@@ -145,6 +223,14 @@ export default function WritingWorkspace() {
           🎬 场景
         </button>
         <button
+          className={`mt-btn${mode === 'continue' ? ' active' : ''}`}
+          onClick={() => setMode('continue')}
+          style={{ fontSize: 11, padding: '3px 10px', border: `1px solid ${mode === 'continue' ? 'var(--mt-accent)' : 'var(--mt-border)'}` }}
+          title="接着当前正文继续写"
+        >
+          ✍️ 续写
+        </button>
+        <button
           className={`mt-btn${mode === 'outline' ? ' active' : ''}`}
           onClick={() => setMode('outline')}
           style={{ fontSize: 11, padding: '3px 10px', border: `1px solid ${mode === 'outline' ? 'var(--mt-accent)' : 'var(--mt-border)'}` }}
@@ -158,15 +244,15 @@ export default function WritingWorkspace() {
         <button
           className="mt-btn active"
           onClick={handleGenerate}
-          disabled={streaming || selectedIds.length === 0}
+          disabled={genDisabled}
           style={{
             fontSize: 12, padding: '4px 14px', fontWeight: 600,
             border: '1px solid var(--mt-accent)',
-            opacity: selectedIds.length === 0 ? 0.5 : 1,
+            opacity: genDisabled && !streaming ? 0.5 : 1,
             whiteSpace: 'nowrap',
           }}
         >
-          {streaming ? '⏳ 生成中...' : `✨ 生成${mode === 'scene' ? '场景正文' : '大纲'}`}
+          {streaming ? '⏳ 生成中...' : `✨ ${genVerb}`}
         </button>
 
         <div style={{ flex: 1 }} />
@@ -272,11 +358,74 @@ export default function WritingWorkspace() {
               />
             </div>
           )}
+          {mode === 'continue' && (
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--mt-border-soft)', fontSize: 10, color: 'var(--mt-text-muted)', lineHeight: 1.5 }}>
+              ✍️ 续写模式：将接着右侧编辑器中的正文继续写。请确保编辑区已有内容。
+            </div>
+          )}
+
+          {/* Generation parameters */}
+          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--mt-border-soft)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {mode !== 'outline' && (
+              <>
+                <Segmented
+                  label="篇幅"
+                  value={length}
+                  options={[['short', '短'], ['medium', '中'], ['long', '长']]}
+                  onChange={(v) => setLength(v as Length)}
+                />
+                <Segmented
+                  label="视角"
+                  value={pov}
+                  options={[['first', '第一'], ['third', '第三'], ['omniscient', '全知']]}
+                  onChange={(v) => setPov(v as Pov)}
+                />
+              </>
+            )}
+            <Segmented
+              label="语言"
+              value={language}
+              options={[['zh', '中文'], ['en', 'EN']]}
+              onChange={(v) => setLanguage(v as Lang)}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 10, color: 'var(--mt-text-muted)', width: 28, flexShrink: 0 }}>文风</span>
+              <input
+                value={style}
+                onChange={(e) => setStyle(e.target.value)}
+                placeholder="如：冷峻克制"
+                style={{
+                  flex: 1, fontSize: 11, padding: '3px 6px',
+                  background: 'var(--mt-window)', border: '1px solid var(--mt-border)',
+                  borderRadius: 4, color: 'var(--mt-text)', outline: 'none', minWidth: 0,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Source quick actions */}
+          {mode !== 'continue' && (
+            <div style={{ display: 'flex', gap: 4, padding: '6px 12px', borderBottom: '1px solid var(--mt-border-soft)', flexWrap: 'wrap' }}>
+              <button className="mt-btn" onClick={importFromGraph} disabled={!selectedEntityId}
+                title={selectedEntityId ? '把主图中选中的节点加入来源' : '主图未选中节点'}
+                style={{ fontSize: 10, padding: '2px 6px', border: '1px solid var(--mt-border)', opacity: selectedEntityId ? 1 : 0.5 }}>
+                ⤵ 从主图带入
+              </button>
+              <button className="mt-btn" onClick={selectAll}
+                style={{ fontSize: 10, padding: '2px 6px', border: '1px solid var(--mt-border)' }}>
+                全选
+              </button>
+              <button className="mt-btn" onClick={clearAll}
+                style={{ fontSize: 10, padding: '2px 6px', border: '1px solid var(--mt-border)' }}>
+                清空
+              </button>
+            </div>
+          )}
 
           {/* Entity list grouped by type */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
             <div style={{ padding: '2px 12px 6px', fontSize: 10, color: 'var(--mt-text-muted)' }}>
-              选择参与实体（2-hop 上下文将自动注入）
+              选择参与实体（{writingHop}-hop 上下文将自动注入）
             </div>
             {typeOrder.map((t) => {
               const list = entitiesByType[t];
@@ -291,6 +440,14 @@ export default function WritingWorkspace() {
                     background: 'rgba(255,255,255,0.5)',
                   }}>
                     {cfg.icon} {cfg.label}
+                    <span style={{ flex: 1 }} />
+                    <span
+                      onClick={() => toggleType(t)}
+                      title="全选 / 清空该类型"
+                      style={{ fontSize: 9, fontWeight: 500, color: 'var(--mt-text-muted)', cursor: 'pointer' }}
+                    >
+                      {list.every((e) => selectedIds.includes(e.id)) ? '清空' : '全选'}
+                    </span>
                   </div>
                   {list.map((e) => {
                     const on = selectedIds.includes(e.id);
@@ -324,15 +481,15 @@ export default function WritingWorkspace() {
             <button
               className="mt-btn active"
               onClick={handleGenerate}
-              disabled={streaming || selectedIds.length === 0}
+              disabled={genDisabled}
               style={{
                 width: '100%', fontWeight: 600, fontSize: 12,
                 border: '1px solid var(--mt-accent)',
-                opacity: selectedIds.length === 0 ? 0.5 : 1,
+                opacity: genDisabled && !streaming ? 0.5 : 1,
                 justifyContent: 'center',
               }}
             >
-              {streaming ? '⏳ 生成中...' : `✨ 生成${mode === 'scene' ? '场景正文' : '大纲'}`}
+              {streaming ? '⏳ 生成中...' : `✨ ${genVerb}`}
             </button>
           </div>
         </div>
@@ -348,7 +505,7 @@ export default function WritingWorkspace() {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 48, marginBottom: 16 }}>✍️</div>
                 从左侧选择来源实体，点击「生成」开始创作<br />
-                <span style={{ fontSize: 12 }}>2-hop 图谱上下文将自动注入到 Prompt 中</span>
+                <span style={{ fontSize: 12 }}>{writingHop}-hop 图谱上下文将自动注入到 Prompt 中</span>
               </div>
             </div>
           )}
@@ -384,7 +541,6 @@ export default function WritingWorkspace() {
                     value={generated}
                     onChange={(e) => gen.set(e.target.value)}
                     onKeyDown={gen.onKeyDown}
-                    readOnly={!!viewingDoc}
                     style={{
                       flex: 1, resize: 'none', border: 'none', outline: 'none',
                       fontSize: 15, lineHeight: 1.8, padding: 20,
@@ -447,15 +603,44 @@ export default function WritingWorkspace() {
                       gen.reset(doc.content);
                     }
                   }}
+                  onDoubleClick={(e) => { e.stopPropagation(); handleRename(doc); }}
+                  title="单击查看/编辑，双击重命名"
                   style={{
+                    position: 'relative',
                     padding: '8px 10px', marginBottom: 4, borderRadius: 4,
                     border: `1px solid ${viewingDocId === doc.id ? 'var(--mt-accent)' : 'var(--mt-border)'}`,
                     cursor: 'pointer',
                     background: viewingDocId === doc.id ? 'var(--mt-accent)11' : '#fff',
                   }}
                 >
-                  <div style={{ fontWeight: 500, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {doc.kind === 'scene' ? '🎬' : '📋'} {doc.title}
+                  {/* Card actions */}
+                  <span style={{ position: 'absolute', top: 4, right: 6, display: 'flex', gap: 6 }}>
+                    <span
+                      onClick={(e) => { e.stopPropagation(); exportMd(doc.title, doc.content); }}
+                      title="导出 .md"
+                      style={{ fontSize: 11, lineHeight: 1, color: '#bbb', cursor: 'pointer' }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = 'var(--mt-accent)'; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#bbb'; }}
+                    >
+                      ⬇
+                    </span>
+                    <span
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!confirm(`删除文稿「${doc.title}」？`)) return;
+                        await removeDocument(doc.id);
+                        if (viewingDocId === doc.id) { setViewingDocId(null); gen.reset(''); }
+                      }}
+                      title="删除文稿"
+                      style={{ fontSize: 11, lineHeight: 1, color: '#ccc', cursor: 'pointer' }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#c0392b'; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#ccc'; }}
+                    >
+                      ✕
+                    </span>
+                  </span>
+                  <div style={{ fontWeight: 500, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 32 }}>
+                    {doc.kind === 'outline' ? '📋' : '🎬'} {doc.title}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginTop: 2 }}>
                     {doc.content.length} 字
@@ -479,34 +664,82 @@ export default function WritingWorkspace() {
       </div>
 
       {/* ── Bottom save bar ── */}
-      {generated && !streaming && !viewingDoc && (
+      {generated && !streaming && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '6px 16px', borderTop: '1px solid var(--mt-border)',
           background: 'var(--mt-panel)', flexShrink: 0,
         }}>
           <span style={{ fontSize: 12, color: 'var(--mt-text-muted)' }}>
-            {generated.length} 字
+            {generated.length} 字{viewingDoc ? `　·　正在编辑「${viewingDoc.title}」${docDirty ? '（未保存）' : ''}` : ''}
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="mt-btn"
+              onClick={() => exportMd(viewingDoc?.title || 'document', generated)}
+              style={{ fontSize: 11, padding: '4px 12px', border: '1px solid var(--mt-border)' }}
+            >
+              ⬇ 导出 .md
+            </button>
             <button
               className="mt-btn"
               onClick={() => { gen.reset(''); setViewingDocId(null); }}
               style={{ fontSize: 11, padding: '4px 12px', border: '1px solid var(--mt-border)' }}
             >
-              清空
+              {viewingDoc ? '关闭' : '清空'}
             </button>
-            <button
-              className="mt-btn active"
-              onClick={handleSave}
-              disabled={saving}
-              style={{ fontSize: 12, padding: '4px 16px', fontWeight: 600, border: '1px solid var(--mt-accent)' }}
-            >
-              {saving ? '保存中...' : '💾 保存文稿'}
-            </button>
+            {viewingDoc ? (
+              <button
+                className="mt-btn active"
+                onClick={handleUpdateDoc}
+                disabled={saving || !docDirty}
+                style={{ fontSize: 12, padding: '4px 16px', fontWeight: 600, border: '1px solid var(--mt-accent)', opacity: !docDirty ? 0.5 : 1 }}
+              >
+                {saving ? '更新中...' : '💾 更新文稿'}
+              </button>
+            ) : (
+              <button
+                className="mt-btn active"
+                onClick={handleSave}
+                disabled={saving}
+                style={{ fontSize: 12, padding: '4px 16px', fontWeight: 600, border: '1px solid var(--mt-accent)' }}
+              >
+                {saving ? '保存中...' : '💾 保存文稿'}
+              </button>
+            )}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Small segmented control for generation params ──
+function Segmented({ label, value, options, onChange }: {
+  label: string;
+  value: string;
+  options: [string, string][];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 10, color: 'var(--mt-text-muted)', width: 28, flexShrink: 0 }}>{label}</span>
+      <div style={{ display: 'flex', flex: 1, border: '1px solid var(--mt-border)', borderRadius: 4, overflow: 'hidden' }}>
+        {options.map(([key, lbl]) => (
+          <button
+            key={key}
+            onClick={() => onChange(key)}
+            style={{
+              flex: 1, fontSize: 10, padding: '3px 0', border: 'none', cursor: 'pointer',
+              background: value === key ? 'var(--mt-accent)' : 'transparent',
+              color: value === key ? '#fff' : 'var(--mt-text-muted)',
+              fontWeight: value === key ? 600 : 400,
+            }}
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

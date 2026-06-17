@@ -157,7 +157,14 @@ class DocumentOut(BaseModel):
 
 # --- Generation ---
 class GenerateRequest(BaseModel):
-    mode: str = "scene"  # scene, outline
+    mode: str = "scene"  # scene, outline, continue
     context_entity_ids: list[str] = Field(default_factory=list)
     context_event_ids: list[str] = Field(default_factory=list)
     scene_description: str = ""
+    # Generation controls (all optional, backward-compatible)
+    length: str = "medium"      # short | medium | long
+    style: str = ""             # free-form tone, e.g. 「冷峻克制」
+    pov: str = "third"          # first | third | omniscient
+    language: str = "zh"        # zh | en
+    instruction: str = ""       # extra free-form instruction
+    prior_text: str = ""        # existing prose, for continue mode
