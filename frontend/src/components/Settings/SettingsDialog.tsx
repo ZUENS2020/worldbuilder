@@ -16,7 +16,7 @@ const HOP_FIELDS: { key: keyof GraphHopSettings; label: string; hint: string }[]
   { key: 'transform_expand', label: 'Transform 展开', hint: '展开关系人/事件等图谱 Transform 的 BFS 深度' },
   { key: 'transform_enemy', label: '敌对阵营搜索', hint: '「查找敌对阵营」Transform 的搜索深度' },
   { key: 'ai_context', label: 'AI 关系上下文', hint: 'AI 推断、矛盾检测、背景生成时纳入的关系范围' },
-  { key: 'writing_context', label: '写作上下文', hint: '写作工作台生成时注入的图谱深度' },
+  { key: 'context_injection', label: 'ST 上下文注入', hint: 'SillyTavern 插件查询图谱上下文时的 BFS 深度' },
   { key: 'isolate_subgraph', label: '子图隔离', hint: '探索模式「只看此子图」的 BFS 深度' },
 ];
 

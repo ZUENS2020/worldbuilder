@@ -13,17 +13,6 @@ interface AICandidate {
   source_entity_id: string;
 }
 
-interface Document {
-  id: string;
-  project_id: string;
-  title: string;
-  kind: string;
-  content: string;
-  refs: Record<string, any>;
-  created_at: string | null;
-  updated_at: string | null;
-}
-
 interface AppState {
   // Project
   project: Project | null;
@@ -123,16 +112,9 @@ interface AppState {
   dropRequest: { id: string; x: number; y: number } | null;
   setDropRequest: (d: { id: string; x: number; y: number } | null) => void;
 
-  // View mode (M3: relations/events/writing)
-  viewMode: 'relations' | 'events' | 'writing';
-  setViewMode: (v: 'relations' | 'events' | 'writing') => void;
-
-  // Documents (M4)
-  documents: Document[];
-  loadDocuments: () => Promise<void>;
-  addDocument: (data: { title: string; kind: string; content: string; refs?: any }) => Promise<Document>;
-  updateDocument: (id: string, data: any) => Promise<void>;
-  removeDocument: (id: string) => Promise<void>;
+  // View mode
+  viewMode: 'relations' | 'events';
+  setViewMode: (v: 'relations' | 'events') => void;
 
   // Settings dialog
   settingsOpen: boolean;
@@ -174,7 +156,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       focusEntityId: null,
       focusNonce: 0,
       aiCandidates: [],
-      documents: [],
       visibleEntityIds: new Set<string>(),
       explorationHistory: [],
       explorationInitial: new Set<string>(),
@@ -197,7 +178,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (remaining.length > 0) {
           await get().switchProject(remaining[0].id);
         } else {
-          set({ project: null, entities: [], relations: [], tags: [], customRelationTypes: [], documents: [] });
+          set({ project: null, entities: [], relations: [], tags: [], customRelationTypes: [] });
         }
       }
     } catch (e) {
@@ -743,34 +724,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   // View mode
   viewMode: 'relations',
   setViewMode: (v) => set({ viewMode: v }),
-
-  // Documents
-  documents: [],
-  loadDocuments: async () => {
-    const projectId = get().project?.id;
-    if (!projectId) return;
-    const docs = await api.listDocuments(projectId);
-    set({ documents: docs });
-  },
-  addDocument: async (data) => {
-    const projectId = get().project?.id;
-    if (!projectId) throw new Error('No project selected');
-    const doc = await api.createDocument(projectId, data);
-    set((s) => ({ documents: [...s.documents, doc] }));
-    return doc;
-  },
-  updateDocument: async (id, data) => {
-    const projectId = get().project?.id;
-    if (!projectId) return;
-    const updated = await api.updateDocument(projectId, id, data);
-    set((s) => ({ documents: s.documents.map((d) => (d.id === id ? updated : d)) }));
-  },
-  removeDocument: async (id) => {
-    const projectId = get().project?.id;
-    if (!projectId) return;
-    await api.deleteDocument(projectId, id);
-    set((s) => ({ documents: s.documents.filter((d) => d.id !== id) }));
-  },
 
   // Settings
   settingsOpen: false,

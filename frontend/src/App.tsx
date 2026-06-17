@@ -8,7 +8,6 @@ import Palette from './components/Palette/Palette';
 import Inspector from './components/Inspector/Inspector';
 import Timeline from './components/Timeline/Timeline';
 import EventGraph from './components/EventGraph/EventGraph';
-import WritingWorkspace from './components/Writing/WritingWorkspace';
 import AISuggestionReview from './components/AIReview/AISuggestionReview';
 import SettingsDialog from './components/Settings/SettingsDialog';
 import ProjectSwitcher from './components/ProjectSwitcher/ProjectSwitcher';
@@ -51,7 +50,6 @@ function App() {
     window.addEventListener('mouseup', onUp);
   }, [inspectorWidth]);
 
-  // Esc → leave Transform tab (back to 详情)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -73,7 +71,6 @@ function App() {
     (async () => {
       try {
         const projectList = await api.listProjects();
-        // Store projects in state
         useAppStore.setState({ projects: projectList });
         if (projectList.length > 0) {
           setProject(projectList[0]);
@@ -100,20 +97,17 @@ function App() {
   };
 
   const handleDeleteProject = async (id: string, name: string) => {
-    if (!confirm(`确定删除项目「${name}」？所有实体、关系和文档将被永久删除。`)) return;
+    if (!confirm(`确定删除项目「${name}」？所有实体与关系将被永久删除。`)) return;
     await deleteProject(id);
   };
 
-  // --- Project setup screen (no project loaded) ---
   if (!project) {
     return (
       <div style={{ width: '100vw', height: '100vh', background: 'var(--mt-window)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--mt-text)' }}>
         <div style={{ textAlign: 'center', background: 'var(--mt-panel)', border: '1px solid var(--mt-border)', borderRadius: 8, padding: 40, boxShadow: '0 4px 24px rgba(0,0,0,0.12)', width: 'min(520px, 90vw)' }}>
           <div style={{ fontSize: 44, marginBottom: 12 }}>🌐</div>
           <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6, color: 'var(--mt-accent-dark)' }}>WorldBuilder</h1>
-          <p style={{ color: 'var(--mt-text-muted)', fontSize: 13, marginBottom: 22 }}>写小说就像在做一次情报调查</p>
-
-          {/* Create new project */}
+          <p style={{ color: 'var(--mt-text-muted)', fontSize: 13, marginBottom: 22 }}>知识图谱驱动的世界观构建与调查</p>
           <div style={{ display: 'flex', gap: 8, marginBottom: 20, justifyContent: 'center' }}>
             <input
               value={projectInput}
@@ -132,8 +126,6 @@ function App() {
               创建项目
             </button>
           </div>
-
-          {/* Existing projects list */}
           {projects.length > 0 && (
             <div style={{ borderTop: '1px solid var(--mt-border)', paddingTop: 16 }}>
               <div style={{ fontSize: 12, color: 'var(--mt-text-muted)', marginBottom: 10, fontWeight: 600 }}>已有项目</div>
@@ -180,84 +172,72 @@ function App() {
     );
   }
 
-  // View title + icon for panel header
   const viewConfig: Record<string, { icon: string; label: string }> = {
     relations: { icon: '🕸️', label: '关系图' },
     events: { icon: '⚡', label: '事件图' },
-    writing: { icon: '✍️', label: '写作' },
   };
   const vc = viewConfig[viewMode] || viewConfig.relations;
 
-  // --- Main desktop layout ---
   return (
     <ReactFlowProvider>
       <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh', background: 'var(--mt-window)', overflow: 'hidden' }}>
         <Toolbar />
 
-        <div style={{ display: 'flex', flex: 1, minHeight: 0, padding: viewMode === 'writing' ? 0 : 4, gap: viewMode === 'writing' ? 0 : 4 }}>
-          {/* Full-screen writing mode: hide Palette/Inspector/Timeline */}
-          {viewMode === 'writing' ? (
-            <WritingWorkspace />
-          ) : (
-            <>
-              <Palette />
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, padding: 4, gap: 4 }}>
+          <Palette />
 
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div className="mt-panel" style={{ flex: 1, minHeight: 0, padding: 0 }}>
-                  <div className="mt-panel-title" style={{ justifyContent: 'space-between' }}>
-                    <span>{vc.icon} {vc.label}</span>
-                    <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                      {/* View mode switcher */}
-                      {(['relations', 'events', 'writing'] as const).map((vm) => (
-                        <button
-                          key={vm}
-                          className={`mt-btn${viewMode === vm ? ' active' : ''}`}
-                          style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
-                          onClick={() => setViewMode(vm)}
-                        >
-                          {viewConfig[vm].icon} {viewConfig[vm].label}
-                        </button>
-                      ))}
-                      <span style={{ width: 8 }} />
-                      <button
-                        className={`mt-btn${showTimeline ? ' active' : ''}`}
-                        style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
-                        onClick={() => setShowTimeline((v) => !v)}
-                      >
-                        ⏳
-                      </button>
-                      <button
-                        className="mt-btn"
-                        style={{ fontSize: 10, padding: '1px 6px', height: 18 }}
-                        onClick={() => setSettingsOpen(true)}
-                      >
-                        ⚙️
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-panel-body" style={{ overflow: 'hidden', position: 'relative' }}>
-                    {viewMode === 'relations' && <Canvas />}
-                    {viewMode === 'events' && <EventGraph />}
-                  </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div className="mt-panel" style={{ flex: 1, minHeight: 0, padding: 0 }}>
+              <div className="mt-panel-title" style={{ justifyContent: 'space-between' }}>
+                <span>{vc.icon} {vc.label}</span>
+                <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                  {(['relations', 'events'] as const).map((vm) => (
+                    <button
+                      key={vm}
+                      className={`mt-btn${viewMode === vm ? ' active' : ''}`}
+                      style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
+                      onClick={() => setViewMode(vm)}
+                    >
+                      {viewConfig[vm].icon} {viewConfig[vm].label}
+                    </button>
+                  ))}
+                  <span style={{ width: 8 }} />
+                  <button
+                    className={`mt-btn${showTimeline ? ' active' : ''}`}
+                    style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
+                    onClick={() => setShowTimeline((v) => !v)}
+                  >
+                    ⏳
+                  </button>
+                  <button
+                    className="mt-btn"
+                    style={{ fontSize: 10, padding: '1px 6px', height: 18 }}
+                    onClick={() => setSettingsOpen(true)}
+                  >
+                    ⚙️
+                  </button>
                 </div>
-                {showTimeline && <Timeline />}
               </div>
+              <div className="mt-panel-body" style={{ overflow: 'hidden', position: 'relative' }}>
+                {viewMode === 'relations' && <Canvas />}
+                {viewMode === 'events' && <EventGraph />}
+              </div>
+            </div>
+            {showTimeline && <Timeline />}
+          </div>
 
-              <div
-                onMouseDown={startResize}
-                title="拖拽调整宽度"
-                style={{ width: 5, cursor: 'col-resize', flex: '0 0 5px', alignSelf: 'stretch', background: 'transparent' }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--mt-sel-border)')}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
-              />
-              <div style={{ width: inspectorWidth, flex: `0 0 ${inspectorWidth}px`, display: 'flex', flexDirection: 'column' }}>
-                <Inspector />
-              </div>
-            </>
-          )}
+          <div
+            onMouseDown={startResize}
+            title="拖拽调整宽度"
+            style={{ width: 5, cursor: 'col-resize', flex: '0 0 5px', alignSelf: 'stretch', background: 'transparent' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--mt-sel-border)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+          />
+          <div style={{ width: inspectorWidth, flex: `0 0 ${inspectorWidth}px`, display: 'flex', flexDirection: 'column' }}>
+            <Inspector />
+          </div>
         </div>
 
-        {/* Status bar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '3px 12px', borderTop: '1px solid var(--mt-border)', background: 'linear-gradient(var(--mt-panel-header-2), var(--mt-panel-header))', fontSize: 11, color: 'var(--mt-text-muted)' }}>
           <span
             ref={statusBarRef}
@@ -275,7 +255,6 @@ function App() {
         </div>
       </div>
 
-      {/* Global overlays */}
       {aiCandidates.length > 0 && (
         <AISuggestionReview
           candidates={aiCandidates}

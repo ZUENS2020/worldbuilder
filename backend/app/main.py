@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, async_session
 from app.models.models import Entity, Relation, Project
 from app.graph.engine import graph_engine
-from app.routers import projects, entities, relations, transforms, documents
+from app.routers import projects, entities, relations, transforms
 from sqlalchemy import select
 
 
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="WorldBuilder API",
-    description="AI-assisted novel creation platform with knowledge graph core",
+    description="Knowledge graph worldbuilding platform with AI-assisted investigation",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -56,7 +56,6 @@ app.include_router(projects.router)
 app.include_router(entities.router)
 app.include_router(relations.router)
 app.include_router(transforms.router)
-app.include_router(documents.router)
 
 
 @app.get("/api/health")

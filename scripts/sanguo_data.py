@@ -8,7 +8,7 @@ PROJECT = {
             "transform_expand": 1,
             "transform_enemy": 2,
             "ai_context": 1,
-            "writing_context": 2,
+            "context_injection": 2,
             "isolate_subgraph": 2,
         },
     },

@@ -59,7 +59,7 @@ async def get_context(
     """Get graph context for ST plugin injection."""
     project = await db.get(Project, project_id)
     hops = resolve_graph_hops(project.settings if project else {})
-    context_hop = hop if hop is not None else hops["writing_context"]
+    context_hop = hop if hop is not None else hops["context_injection"]
 
     char_list = [c.strip() for c in characters.split(",")]
     entity_ids = []

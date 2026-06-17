@@ -47,16 +47,3 @@ class Relation(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     project = relationship("Project", back_populates="relations")
-
-
-class Document(Base):
-    __tablename__ = "documents"
-
-    id = Column(String, primary_key=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
-    title = Column(String, nullable=False)
-    kind = Column(String, nullable=False)  # scene, draft, outline
-    content = Column(Text, default="")
-    refs = Column(JSON, default=dict)  # {entity_ids: [...], event_ids: [...]}
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

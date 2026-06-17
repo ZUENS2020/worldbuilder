@@ -1,7 +1,7 @@
 /**
  * Markdown — the single, system-wide Markdown renderer.
  *
- * Every place that shows Markdown (writing workspace, doc previews,
+ * Inspector property lists, AI review, and settings.
  * Inspector backstory / AI results, editor modal preview) renders through
  * THIS component. No other file imports `react-markdown` / `remark-*` or
  * writes its own preprocessing — all normalization lives in
