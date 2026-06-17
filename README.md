@@ -7,7 +7,6 @@
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20Vite-61dafb)
-![AI](https://img.shields.io/badge/AI-OpenRouter-orange)
 
 一个以**知识图谱为核心**的 AI 辅助长篇小说创作平台。借鉴 OSINT 情报工具（[Maltego](https://www.maltego.com/)）的交互范式，把人物、地点、事件、阵营组织成一张可视化关系图，从根源上解决长篇创作中的两大痛点：
 
