@@ -5,6 +5,9 @@ import type { EntityType, RelationType } from '../../types';
 import TextEditorModal from '../common/TextEditorModal';
 import Markdown from '../common/Markdown';
 import TransformPanel from '../Transform/TransformPanel';
+import EntityPropertyList from './EntityPropertyList';
+import { buildPropertiesWithOrder, getOrderedPropertyEntries } from '../../utils/propertyOrder';
+import { ImeInput } from '../common/ImeInput';
 
 // Built-in relation type keys
 const BUILTIN_RELATION_TYPES = Object.keys(RELATION_CONFIG) as RelationType[];
@@ -151,13 +154,13 @@ export default function Inspector() {
   const handlePropertyChange = (key: string, value: string) =>
     updateEntity(entity.id, { properties: { ...entity.properties, [key]: value } });
 
-  const handleDelete = () => { if (confirm(`确定删除 ${entity.name}？`)) removeEntity(entity.id); };
-
-  const handleDeleteProperty = (key: string) => {
-    if (!confirm(`删除属性「${key}」？`)) return;
-    const { [key]: _removed, ...rest } = entity.properties || {};
-    updateEntity(entity.id, { properties: rest });
+  const handleNameChange = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === entity.name) return;
+    updateEntity(entity.id, { name: trimmed });
   };
+
+  const handleDelete = () => { if (confirm(`确定删除 ${entity.name}？`)) removeEntity(entity.id); };
 
   const handleAITransform = async (type: string) => {
     setAiLoading(type);
@@ -173,10 +176,12 @@ export default function Inspector() {
 
   const handleAddProperty = () => {
     const key = prompt('属性名:');
-    if (!key) return;
+    if (!key || key === '_property_order' || key === 'name' || key === 'label') return;
     const value = prompt('属性值:');
     if (value === null) return;
-    updateEntity(entity.id, { properties: { ...entity.properties, [key]: value } });
+    const entries = getOrderedPropertyEntries(entity.properties);
+    entries.push([key, value]);
+    updateEntity(entity.id, { properties: buildPropertiesWithOrder(entries, entity.properties || {}) });
   };
 
   const handleAddRelation = async () => {
@@ -225,8 +230,25 @@ export default function Inspector() {
             {config.icon}
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entity.name}</div>
-            <div style={{ color: config.color, fontSize: 11 }}>{config.label}</div>
+            <ImeInput
+              value={entity.name}
+              onCommit={handleNameChange}
+              title="实体名称（失焦或 Enter 保存）"
+              style={{
+                width: '100%', fontWeight: 600, fontSize: 14,
+                background: 'transparent', border: '1px solid transparent', borderRadius: 3,
+                padding: '2px 4px', color: 'var(--mt-text)', outline: 'none',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.background = '#fff';
+                e.currentTarget.style.borderColor = 'var(--mt-border)';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.borderColor = 'transparent';
+              }}
+            />
+            <div style={{ color: config.color, fontSize: 11, paddingLeft: 4 }}>{config.label}</div>
           </div>
           <button className="mt-btn" onClick={handleDelete} title="删除" style={{ color: '#c0392b' }}>🗑️</button>
         </div>
@@ -261,70 +283,17 @@ export default function Inspector() {
           )}
         </div>
 
-        {/* Properties */}
-        <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--mt-border-soft)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <span style={sectionLabel}>属性 Properties</span>
-            <button className="mt-btn" onClick={handleAddProperty} style={{ fontSize: 10, padding: '1px 6px', border: '1px solid var(--mt-border)' }}>＋ 添加</button>
-          </div>
-          {Object.keys(entity.properties || {}).length === 0 && (
-            <div style={{ color: 'var(--mt-text-faint)', fontSize: 11 }}>（暂无属性）</div>
-          )}
-          {Object.entries(entity.properties || {}).map(([key, value]) => {
-            const isString = typeof value === 'string';
-            const isLong = isString && (value as string).length > 80;
-            return (
-              <div key={key} style={{ marginBottom: 7 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'space-between', marginBottom: 2 }}>
-                  <span style={{ color: 'var(--mt-text-muted)', fontSize: 10 }}>{key}</span>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {isLong && (
-                      <button
-                        className="mt-btn"
-                        style={{ fontSize: 9, padding: '0 5px', height: 16, color: 'var(--mt-text-muted)' }}
-                        onClick={() => toggleInlineEdit(key)}
-                        title={inlineEditFields.has(key) ? '完成编辑（显示渲染）' : '内联编辑源码'}
-                      >
-                        {inlineEditFields.has(key) ? '✓ 完成' : '✎ 编辑'}
-                      </button>
-                    )}
-                    {isString && (
-                      <button
-                        className="mt-btn"
-                        style={{ fontSize: 9, padding: '0 5px', height: 16, color: 'var(--mt-accent)' }}
-                        onClick={() => setEditingField(key)}
-                        title="放大编辑"
-                      >
-                        ⤢ 放大
-                      </button>
-                    )}
-                    <button
-                      className="mt-btn"
-                      style={{ fontSize: 9, padding: '0 5px', height: 16, color: '#c0392b' }}
-                      onClick={() => handleDeleteProperty(key)}
-                      title="删除属性"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                {isLong ? (
-                  inlineEditFields.has(key) ? (
-                    <textarea value={value as string} onChange={(e) => handlePropertyChange(key, e.target.value)} rows={8} style={fieldStyle} />
-                  ) : (
-                    <Markdown
-                      style={{ fontSize: 12, lineHeight: 1.6, padding: '6px 8px', border: '1px solid var(--mt-border-soft)', borderRadius: 4, background: 'var(--mt-panel-header-2)' }}
-                    >
-                      {value as string}
-                    </Markdown>
-                  )
-                ) : (
-                  <input value={String(value)} onChange={(e) => handlePropertyChange(key, e.target.value)} style={fieldStyle} />
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <EntityPropertyList
+          entityId={entity.id}
+          properties={entity.properties || {}}
+          updateEntity={updateEntity}
+          inlineEditFields={inlineEditFields}
+          toggleInlineEdit={toggleInlineEdit}
+          setEditingField={setEditingField}
+          fieldStyle={fieldStyle}
+          sectionLabel={sectionLabel}
+          onAdd={handleAddProperty}
+        />
 
         {/* Relations */}
         <div style={{ padding: '10px 12px' }}>

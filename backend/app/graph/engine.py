@@ -36,7 +36,7 @@ PROPERTY_KEY_LABELS = {
     "weakness": "弱点", "motto": "口头禅", "outfit": "服装", "weapon": "武器",
 }
 # Property keys that are redundant with the entity name / internal — skip.
-_SKIP_PROP_KEYS = {"label", "name"}
+_SKIP_PROP_KEYS = {"label", "name", "_property_order"}
 
 
 def _format_props(props: dict) -> list[str]:

@@ -17,6 +17,7 @@ export default function TextEditorModal({ title, initialValue, onSave, onClose }
   const value = h.value;
   const [view, setView] = useState<ViewMode>('split');
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const composingRef = useRef(false);
   const valueRef = useRef(value);
   valueRef.current = value;
 
@@ -80,7 +81,15 @@ export default function TextEditorModal({ title, initialValue, onSave, onClose }
               ref={taRef}
               value={value}
               onChange={(e) => h.set(e.target.value)}
-              onKeyDown={h.onKeyDown}
+              onCompositionStart={() => { composingRef.current = true; }}
+              onCompositionEnd={(e) => {
+                composingRef.current = false;
+                h.set(e.currentTarget.value);
+              }}
+              onKeyDown={(e) => {
+                if (composingRef.current && e.key !== 'Escape') return;
+                h.onKeyDown(e);
+              }}
               style={{
                 flex: 1, width: '100%', resize: 'none', border: '1px solid var(--mt-border)',
                 borderRadius: 4, padding: '12px 14px', fontSize: 14, lineHeight: 1.7,
