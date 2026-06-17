@@ -4,7 +4,7 @@
 >
 > *A knowledge-graph-driven worldbuilding platform that treats your story bible like an OSINT investigation.*
 
-![License](https://img.shields.io/badge/license-GPL--3.0-blue)
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-009688)
 ![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20Vite-61dafb)
 
@@ -245,6 +245,6 @@ worldbuilder/
 
 ## 📄 许可证
 
-本项目基于 [GNU General Public License v3.0](LICENSE) 开源。
+本项目基于 [GNU Affero General Public License v3.0](LICENSE) 开源。
 
-你可以自由使用、修改和分发本项目；任何基于本项目的衍生作品在分发时也必须以 GPL-3.0 开源并提供源码。
+你可以自由使用、修改和分发本项目；若你通过网络提供本软件的交互服务，须向用户提供对应源码。任何基于本项目的衍生作品在分发时也必须以 AGPL-3.0 开源并提供源码。
