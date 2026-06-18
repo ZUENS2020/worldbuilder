@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { api } from '../../services/api';
+import { downloadJson, pickJsonFile } from '../../utils/fileIo';
 
 interface ProjectSwitcherProps {
   open: boolean;
@@ -54,6 +55,33 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
       onClose();
     } catch (e) {
       console.error('Failed to duplicate project:', e);
+    }
+    setCreating(false);
+  };
+
+  const handleExport = async (id: string, name: string) => {
+    try {
+      const bundle = await api.exportProject(id);
+      downloadJson(name, bundle);
+    } catch (e) {
+      console.error('Failed to export project:', e);
+      alert('导出失败：' + (e as Error).message);
+    }
+  };
+
+  // Graph import is new-project only — it creates a fresh project, never merges.
+  const handleImport = async () => {
+    try {
+      const bundle = await pickJsonFile();
+      if (bundle == null) return;
+      setCreating(true);
+      const p = await api.importProject(bundle);
+      await useAppStore.getState().loadProjects();
+      await switchProject(p.id);
+      onClose();
+    } catch (e) {
+      console.error('Failed to import project:', e);
+      alert('导入失败：' + (e as Error).message);
     }
     setCreating(false);
   };
@@ -139,6 +167,15 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
                   </div>
                 </div>
                 <span
+                  onClick={(e) => { e.stopPropagation(); handleExport(p.id, p.name); }}
+                  style={{ fontSize: 11, color: '#ccc', cursor: 'pointer', padding: '2px 4px' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = 'var(--mt-accent)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#ccc'; }}
+                  title="导出图谱（实体+关系+世界书）"
+                >
+                  ⬇
+                </span>
+                <span
                   onClick={(e) => { e.stopPropagation(); handleDuplicate(p.id); }}
                   style={{ fontSize: 11, color: '#ccc', cursor: 'pointer', padding: '2px 4px' }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = 'var(--mt-accent)'; }}
@@ -188,6 +225,19 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
             style={{ fontSize: 10, padding: '4px 10px', fontWeight: 600, border: '1px solid var(--mt-accent)', whiteSpace: 'nowrap' }}
           >
             {creating ? '...' : '创建'}
+          </button>
+        </div>
+
+        {/* Graph import — always creates a new project */}
+        <div style={{ padding: '0 12px 10px' }}>
+          <button
+            onClick={handleImport}
+            disabled={creating}
+            className="mt-btn"
+            style={{ width: '100%', fontSize: 10, padding: '5px 0', border: '1px solid var(--mt-border)' }}
+            title="从图谱 JSON 新建项目（实体+关系+世界书）"
+          >
+            ⬆ 导入图谱（新建项目）
           </button>
         </div>
       </div>

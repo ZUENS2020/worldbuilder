@@ -25,6 +25,11 @@ export const api = {
     request(`/projects/${id}`, { method: 'DELETE' }),
   duplicateProject: (id: string) =>
     request<any>(`/projects/${id}/duplicate`, { method: 'POST' }),
+  exportProject: (id: string) =>
+    request<any>(`/projects/${id}/export`),
+  // Graph import is new-project only — creates a fresh project from a bundle.
+  importProject: (bundle: any) =>
+    request<any>(`/projects/import`, { method: 'POST', body: JSON.stringify(bundle) }),
 
   // Entities
   listEntities: (projectId: string) => request<any[]>(`/projects/${projectId}/entities`),
@@ -91,4 +96,9 @@ export const api = {
     request<any>(`/projects/${projectId}/world-entries/${entryId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteWorldEntry: (projectId: string, entryId: string) =>
     request(`/projects/${projectId}/world-entries/${entryId}`, { method: 'DELETE' }),
+  exportWorldEntries: (projectId: string) =>
+    request<any>(`/projects/${projectId}/world-entries/export`),
+  // Import into the CURRENT project (appends). Accepts native or SillyTavern JSON.
+  importWorldEntries: (projectId: string, payload: any) =>
+    request<any[]>(`/projects/${projectId}/world-entries/import`, { method: 'POST', body: JSON.stringify(payload) }),
 };

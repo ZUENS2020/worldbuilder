@@ -6,14 +6,16 @@ scene. See the /context endpoint in entities.py for the wiring.
 """
 
 import uuid
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.models import WorldEntry, Project
+from app.services import io_formats
 
 router = APIRouter(prefix="/api/projects/{project_id}/world-entries", tags=["world-entries"])
 
@@ -114,3 +116,45 @@ async def delete_world_entry(project_id: str, entry_id: str, db: AsyncSession = 
     await db.delete(entry)
     await db.commit()
     return {"ok": True}
+
+
+# ── import / export ──────────────────────────────────────────────
+
+@router.get("/export")
+async def export_world_entries(project_id: str, db: AsyncSession = Depends(get_db)):
+    """Native World Book export envelope (all entries of this project)."""
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    result = await db.execute(
+        select(WorldEntry).where(WorldEntry.project_id == project_id)
+        .order_by(WorldEntry.priority.desc(), WorldEntry.created_at)
+    )
+    return io_formats.serialize_world_entries(result.scalars().all())
+
+
+@router.post("/import", response_model=list[WorldEntryOut])
+async def import_world_entries(
+    project_id: str, payload: Any = Body(...), db: AsyncSession = Depends(get_db)
+):
+    """Import lorebook entries into THIS project (appends, never replaces).
+
+    Auto-detects WorldBuilder native export or a SillyTavern lorebook
+    (world-info / character_book / V2 card). See app/services/io_formats.py.
+    """
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    try:
+        normalized = io_formats.parse_world_entries(payload)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    created = []
+    for fields in normalized:
+        entry = WorldEntry(id=str(uuid.uuid4()), project_id=project_id, **fields)
+        db.add(entry)
+        created.append(entry)
+    await db.commit()
+    for entry in created:
+        await db.refresh(entry)
+    return created

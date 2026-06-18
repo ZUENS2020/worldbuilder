@@ -1,6 +1,8 @@
 """Project CRUD API routes."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import copy
@@ -10,6 +12,7 @@ from app.database import get_db
 from app.models.models import Project, Entity, Relation, WorldEntry
 from app.graph.engine import graph_engine
 from app.schemas import ProjectCreate, ProjectUpdate, ProjectOut
+from app.services import io_formats
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -40,6 +43,83 @@ async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)
     await db.commit()
     await db.refresh(project)
     return project
+
+
+@router.post("/import", response_model=ProjectOut)
+async def import_project(payload: Any = Body(...), db: AsyncSession = Depends(get_db)):
+    """Create a NEW project from a graph bundle (entities + relations + world book).
+
+    Graph import is new-project only — it never merges into an existing project.
+    Entity ids in the bundle are remapped to fresh ids so multiple imports of the
+    same bundle stay independent. See app/services/io_formats.py for the format.
+    """
+    try:
+        bundle = io_formats.parse_project_bundle(payload)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    new_pid = str(uuid.uuid4())
+    id_map = {e["id"]: str(uuid.uuid4()) for e in bundle["entities"]}
+
+    new_project = Project(
+        id=new_pid,
+        name=bundle["name"],
+        description=bundle["description"],
+        settings=_remap_ids(copy.deepcopy(bundle["settings"]), id_map),
+    )
+    db.add(new_project)
+
+    new_entities = []
+    for e in bundle["entities"]:
+        ne = Entity(
+            id=id_map[e["id"]],
+            name=e["name"],
+            type=e["type"],
+            properties=_remap_ids(copy.deepcopy(e["properties"]), id_map),
+            project_id=new_pid,
+        )
+        db.add(ne)
+        new_entities.append(ne)
+
+    new_relations = []
+    for r in bundle["relations"]:
+        src = id_map.get(r["source_id"])
+        tgt = id_map.get(r["target_id"])
+        if not src or not tgt:
+            continue  # drop dangling edges whose endpoints weren't in the bundle
+        nr = Relation(
+            id=str(uuid.uuid4()),
+            source_id=src,
+            target_id=tgt,
+            type=r["type"],
+            properties=_remap_ids(copy.deepcopy(r["properties"]), id_map),
+            weight=r["weight"],
+            project_id=new_pid,
+        )
+        db.add(nr)
+        new_relations.append(nr)
+
+    for w in bundle["world_entries"]:
+        db.add(WorldEntry(
+            id=str(uuid.uuid4()),
+            project_id=new_pid,
+            title=w["title"],
+            content=w["content"],
+            scope=w["scope"],
+            entity_ids=_remap_ids(copy.deepcopy(w["entity_ids"]), id_map),
+            keys=copy.deepcopy(w["keys"]),
+            priority=w["priority"],
+            enabled=w["enabled"],
+            properties=_remap_ids(copy.deepcopy(w["properties"]), id_map),
+        ))
+
+    await db.commit()
+    await db.refresh(new_project)
+
+    graph_engine.load_entities(new_entities)
+    graph_engine.load_relations(new_relations)
+
+    return new_project
 
 
 @router.get("", response_model=list[ProjectOut])
@@ -145,6 +225,18 @@ async def duplicate_project(project_id: str, db: AsyncSession = Depends(get_db))
     graph_engine.load_relations(new_relations)
 
     return new_project
+
+
+@router.get("/{project_id}/export")
+async def export_project(project_id: str, db: AsyncSession = Depends(get_db)):
+    """Self-contained graph bundle (entities + relations + world book) as JSON."""
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    entities = (await db.execute(select(Entity).where(Entity.project_id == project_id))).scalars().all()
+    relations = (await db.execute(select(Relation).where(Relation.project_id == project_id))).scalars().all()
+    world_entries = (await db.execute(select(WorldEntry).where(WorldEntry.project_id == project_id))).scalars().all()
+    return io_formats.serialize_project_bundle(project, entities, relations, world_entries)
 
 
 @router.delete("/{project_id}")

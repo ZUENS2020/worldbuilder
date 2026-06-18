@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { api } from '../../services/api';
 import { ImeInput, ImeTextarea } from '../common/ImeInput';
+import { downloadJson, pickJsonFile } from '../../utils/fileIo';
 
 interface WorldBookDialogProps {
   open: boolean;
@@ -83,6 +84,32 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
     if (selectedId === id) setSelectedId(null);
   };
 
+  const handleExport = async () => {
+    if (!project) return;
+    try {
+      const data = await api.exportWorldEntries(project.id);
+      downloadJson(`${project.name}-worldbook`, data);
+    } catch (e) {
+      console.error('Failed to export world book:', e);
+      alert('导出失败：' + (e as Error).message);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!project) return;
+    try {
+      const payload = await pickJsonFile();
+      if (payload == null) return;
+      const created = await api.importWorldEntries(project.id, payload);
+      await load();
+      if (created[0]) setSelectedId(created[0].id);
+      alert(`已导入 ${created.length} 条词条到当前项目。`);
+    } catch (e) {
+      console.error('Failed to import world book:', e);
+      alert('导入失败：' + (e as Error).message);
+    }
+  };
+
   const toggleEntity = (eid: string) => {
     if (!selected) return;
     const cur = selected.entity_ids || [];
@@ -111,7 +138,11 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
       >
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--mt-border)', fontWeight: 600, fontSize: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>📖 世界书 World Book</span>
-          <button className="mt-btn" onClick={onClose} style={{ fontSize: 12, padding: '2px 10px', border: '1px solid var(--mt-border)' }}>关闭</button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="mt-btn" onClick={handleImport} title="导入 SillyTavern 世界书 或 原生导出（追加到当前项目）" style={{ fontSize: 12, padding: '2px 10px', border: '1px solid var(--mt-border)' }}>⬆ 导入</button>
+            <button className="mt-btn" onClick={handleExport} title="导出当前项目全部词条为 JSON" style={{ fontSize: 12, padding: '2px 10px', border: '1px solid var(--mt-border)' }}>⬇ 导出</button>
+            <button className="mt-btn" onClick={onClose} style={{ fontSize: 12, padding: '2px 10px', border: '1px solid var(--mt-border)' }}>关闭</button>
+          </div>
         </div>
 
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
