@@ -27,8 +27,12 @@ async def append_memory(
     participants: list[str] | None = None,
     salience: float = 0.5,
     kind: str = "episodic",
+    unconfirmed: bool = False,
 ) -> AgentMemory:
     """Write one memory row. Caller commits."""
+    props: dict = {}
+    if unconfirmed:
+        props["unconfirmed"] = True
     row = AgentMemory(
         id=str(uuid.uuid4()),
         project_id=project_id,
@@ -39,7 +43,7 @@ async def append_memory(
         content=content,
         participants=participants or [],
         salience=salience,
-        properties={},
+        properties=props,
     )
     db.add(row)
     return row
@@ -89,7 +93,10 @@ async def get_memory_block(
         for e in recent:
             who = "、".join(e.participants or []) if e.participants else ""
             prefix = f"(t{e.tick}" + (f", 与{who}" if who else "") + ") "
-            lines.append(f"- {prefix}{e.content}")
+            body = e.content or ""
+            if (e.properties or {}).get("unconfirmed"):
+                body = f"（未证实）{body}"
+            lines.append(f"- {prefix}{body}")
     return "\n".join(lines).strip()
 
 
@@ -113,8 +120,12 @@ async def maybe_compact(
         return None
 
     # Fold the oldest batch, keep the most recent `threshold//2` verbatim.
+    # Skip unconfirmed episodics from compaction batches (keep them verbatim longer).
+    compactable = [m for m in episodics if not (m.properties or {}).get("unconfirmed")]
+    if len(compactable) <= threshold:
+        return None
     keep = max(1, threshold // 2)
-    to_fold = episodics[:-keep]
+    to_fold = compactable[:-keep]
     if not to_fold:
         return None
 

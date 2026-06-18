@@ -5,6 +5,7 @@ import InteractionFeed from './InteractionFeed';
 import BeliefPanel from './BeliefPanel';
 import WritebackPanel from './WritebackPanel';
 import TickTimeline from './TickTimeline';
+import { EVOLUTION_SIM_CONFIG } from '../../constants/evolutionSim';
 
 const NUDGE_LABELS: Record<string, string> = {
   off: '关闭',
@@ -19,6 +20,7 @@ export default function SimulatorPanel() {
     loadSims, selectSim, createSim, step, play, pause, resetSim, patchConfig, reset,
   } = useSimStore();
   const projectId = useAppStore((s) => s.project?.id);
+  const projectName = useAppStore((s) => s.project?.name);
   const [tab, setTab] = useState<'feed' | 'belief' | 'writeback'>('feed');
   const [showSettings, setShowSettings] = useState(false);
 
@@ -29,6 +31,11 @@ export default function SimulatorPanel() {
   }, [projectId, loadSims, reset]);
 
   const cfg = sim?.config || {};
+
+  const handleCreateSim = () => {
+    const isEvolution = projectName?.includes('演进测试');
+    createSim('hybrid', isEvolution ? EVOLUTION_SIM_CONFIG : undefined);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -58,7 +65,7 @@ export default function SimulatorPanel() {
         <button
           className="mt-btn"
           style={{ fontSize: 11, padding: '3px 10px' }}
-          onClick={() => createSim('hybrid')}
+          onClick={handleCreateSim}
         >
           ＋ 新建模拟
         </button>
@@ -218,58 +225,19 @@ export default function SimulatorPanel() {
 
           <span style={{ width: 1, height: 18, background: 'var(--mt-border)' }} />
 
-          {/* Drama controls — switchable mechanisms + master intensity dial */}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 5 }} title="戏剧强度总档位：越高，冲突越大胆、转折越剧烈（0~1）">
-            🎭 戏剧
-            <input type="range" min={0} max={1} step={0.05} defaultValue={cfg.drama_intensity ?? 0.3}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5 }} title="悬决事件最多酝酿多少 tick；超过则强制结算（0 = 不强制）">
+            兜底步数
+            <input type="number" min={0} defaultValue={cfg.pending_max_age ?? 8}
               disabled={isPlaying}
-              onChange={(e) => patchConfig({ config: { drama_intensity: Number(e.target.value) } })}
-              style={{ width: 90 }} />
-            <span style={{ width: 24, textAlign: 'right' }}>{Number(cfg.drama_intensity ?? 0.3).toFixed(2)}</span>
+              onBlur={(e) => patchConfig({ config: { pending_max_age: Number(e.target.value) } })}
+              style={{ ...selStyle, width: 48 }} />
           </label>
 
-          {([
-            ['drama_actor', '演员', '让人物主动做出决定性行动/冲突，而非寒暄'],
-            ['drama_oracle', '裁决', '放开关系变化幅度，允许决裂/翻脸/剧变一步到位'],
-            ['drama_scheduler', '调度', '主动撮合敌对/陌生角色，制造对抗'],
-            ['drama_event_injector', '事件', '周期性注入外部突发事件（危机/介入/抉择）'],
-            ['drama_tension', '张力', '积压张力到临界则强制爆发'],
-            ['drama_director', '导演', '全局导演周期性升级一条冲突弧线'],
-          ] as [string, string, string][]).map(([key, label, tip]) => (
-            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 3 }} title={tip}>
-              <input type="checkbox" checked={!!cfg[key]} disabled={isPlaying}
-                onChange={(e) => patchConfig({ config: { [key]: e.target.checked } })} />
-              {label}
-            </label>
-          ))}
-
-          {cfg.drama_event_injector && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 5 }} title="每隔几个 tick 注入一次外部事件">
-              事件频率
-              <input type="number" min={1} defaultValue={cfg.drama_event_every_n ?? 3}
-                disabled={isPlaying}
-                onBlur={(e) => patchConfig({ config: { drama_event_every_n: Number(e.target.value) } })}
-                style={{ ...selStyle, width: 48 }} />
-            </label>
-          )}
-          {cfg.drama_tension && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 5 }} title="张力累积到该阈值即强制爆发">
-              张力阈值
-              <input type="number" min={0.1} step={0.1} defaultValue={cfg.drama_tension_threshold ?? 1.0}
-                disabled={isPlaying}
-                onBlur={(e) => patchConfig({ config: { drama_tension_threshold: Number(e.target.value) } })}
-                style={{ ...selStyle, width: 48 }} />
-            </label>
-          )}
-          {cfg.drama_director && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 5 }} title="每隔几个 tick 刷新一次导演调度">
-              导演频率
-              <input type="number" min={1} defaultValue={cfg.drama_director_every_n ?? 4}
-                disabled={isPlaying}
-                onBlur={(e) => patchConfig({ config: { drama_director_every_n: Number(e.target.value) } })}
-                style={{ ...selStyle, width: 48 }} />
-            </label>
-          )}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 3 }} title="结构性调度：主动让敌对/陌生角色相遇（只决定谁相遇，不决定发生什么）">
+            <input type="checkbox" checked={!!cfg.scheduler_mix_conflict} disabled={isPlaying}
+              onChange={(e) => patchConfig({ config: { scheduler_mix_conflict: e.target.checked } })} />
+            撮合对抗
+          </label>
         </div>
       )}
 

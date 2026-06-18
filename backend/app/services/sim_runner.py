@@ -13,9 +13,47 @@ import asyncio
 import contextlib
 from dataclasses import dataclass, field
 
+from sqlalchemy.exc import OperationalError
+
 from app.database import async_session
 from app.models.models import Simulation
 from app.services.simulation import run_tick, _cfg
+
+_tick_locks: dict[str, asyncio.Lock] = {}
+
+
+def _tick_lock(sim_id: str) -> asyncio.Lock:
+    lock = _tick_locks.get(sim_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _tick_locks[sim_id] = lock
+    return lock
+
+
+async def guarded_run_tick(session, sim: Simulation):
+    """Serialize tick execution per sim — prevents duplicate tick numbers when
+    the background loop and a manual step overlap, or when a long tick releases
+    the DB lock mid-flight."""
+    async with _tick_lock(sim.id):
+        await session.refresh(sim)
+        return await run_tick(session, sim)
+
+
+async def _commit_with_retry(session, *, attempts: int = 8) -> None:
+    """SQLite can briefly lock when a tick is writing; retry instead of 500."""
+    delay = 0.05
+    for i in range(attempts):
+        try:
+            await session.commit()
+            return
+        except OperationalError as exc:
+            if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                raise
+            await session.rollback()
+            if i == attempts - 1:
+                raise
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 1.0)
 
 
 @dataclass
@@ -77,7 +115,7 @@ async def _loop(sim_id: str, project_id: str) -> None:
                     await _pause(session, sim, reason="max_ticks")
                     break
 
-                simtick = await run_tick(session, sim)
+                simtick = await guarded_run_tick(session, sim)
                 await _broadcast(sim_id, {"type": "tick", "tick": _serialize_tick(simtick)})
 
                 mutation_count = len(simtick.mutations or [])
@@ -109,20 +147,21 @@ async def _pause(session, sim: Simulation, *, reason: str) -> None:
 async def play(session, sim: Simulation) -> None:
     """Mark running and (re)start the background task if not already alive."""
     sim.status = "running"
-    await session.commit()
+    await _commit_with_retry(session)
     if not is_running(sim.id):
         r = _runner(sim.id)
         r.task = asyncio.create_task(_loop(sim.id, sim.project_id))
 
 
 async def pause(session, sim: Simulation) -> None:
-    sim.status = "paused"
-    await session.commit()
+    """Stop the loop first, then persist paused status (avoids SQLite lock races)."""
     r = _runners.get(sim.id)
     if r and r.task and not r.task.done():
         r.task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await r.task
+    sim.status = "paused"
+    await _commit_with_retry(session)
     await _broadcast(sim.id, {"type": "paused", "reason": "manual", "tick": sim.current_tick})
 
 

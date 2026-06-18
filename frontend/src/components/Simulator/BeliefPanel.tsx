@@ -3,12 +3,24 @@ import { useSimStore } from '../../stores/simStore';
 import { useAppStore } from '../../stores/appStore';
 import { api } from '../../services/api';
 
+interface BeliefRelation {
+  source_name?: string;
+  target_name?: string;
+  type?: string;
+  type_label?: string;
+  weight?: number;
+  description?: string;
+  label?: string;
+}
+
 interface BeliefRow {
   subject_id: string;
   subject_name: string;
   subject_type: string;
   believed_properties: Record<string, any>;
   truth_properties: Record<string, any>;
+  believed_relations?: BeliefRelation[];
+  truth_relations?: BeliefRelation[];
   as_of_tick: number;
 }
 
@@ -27,8 +39,10 @@ function fmt(v: any): string {
   return String(v);
 }
 
-/** Belief vs. truth for one observer: what this agent thinks the world is like
- * vs. canonical truth. Highlights stale/wrong beliefs and fog-of-war gaps. */
+function relKey(r: BeliefRelation): string {
+  return `${r.source_name}|${r.target_name}|${r.type}`;
+}
+
 export default function BeliefPanel() {
   const sim = useSimStore((s) => s.sim);
   const projectId = useAppStore((s) => s.project?.id);
@@ -43,7 +57,6 @@ export default function BeliefPanel() {
   const [rows, setRows] = useState<BeliefRow[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Default the observer to the first character once entities load.
   useEffect(() => {
     if (!observerId && characters.length > 0) setObserverId(characters[0].id);
   }, [characters, observerId]);
@@ -61,7 +74,6 @@ export default function BeliefPanel() {
       .catch(() => { if (!cancelled) setRows([]); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-    // Re-fetch when the world advances a tick.
   }, [projectId, sim?.id, observerId, sim?.current_tick]);
 
   const observerName = characters.find((c) => c.id === observerId)?.name || '';
@@ -107,7 +119,6 @@ export default function BeliefPanel() {
 }
 
 function SubjectCard({ row, self }: { row: BeliefRow; self: boolean }) {
-  // Union of all keys across belief + truth, classified by diff.
   const keys = useMemo(() => {
     const set = new Set<string>([
       ...Object.keys(row.believed_properties || {}),
@@ -124,6 +135,30 @@ function SubjectCard({ row, self }: { row: BeliefRow; self: boolean }) {
     return fmt(row.believed_properties[k]) === fmt(row.truth_properties[k]) ? 'match' : 'stale';
   };
 
+  const relRows = useMemo(() => {
+    const believed = row.believed_relations || [];
+    const truth = row.truth_relations || [];
+    const truthMap = new Map(truth.map((r) => [relKey(r), r]));
+    const seen = new Set<string>();
+    const out: { key: string; believed?: BeliefRelation; truth?: BeliefRelation; diff: Diff }[] = [];
+    for (const b of believed) {
+      const k = relKey(b);
+      seen.add(k);
+      const t = truthMap.get(k);
+      const diff: Diff = !t ? 'extra' : (
+        b.label === t.label || (
+          b.type === t.type && Number(b.weight ?? 0).toFixed(2) === Number(t.weight ?? 0).toFixed(2)
+        ) ? 'match' : 'stale'
+      );
+      out.push({ key: k, believed: b, truth: t, diff });
+    }
+    for (const t of truth) {
+      const k = relKey(t);
+      if (!seen.has(k)) out.push({ key: k, truth: t, diff: 'unknown' });
+    }
+    return out;
+  }, [row]);
+
   return (
     <div style={{
       border: '1px solid var(--mt-border)', borderRadius: 5,
@@ -137,7 +172,7 @@ function SubjectCard({ row, self }: { row: BeliefRow; self: boolean }) {
         <span style={{ fontSize: 12, fontWeight: 600 }}>{row.subject_name}</span>
         {self && <span style={{ fontSize: 9, color: 'var(--mt-accent)', fontWeight: 600 }}>（自己）</span>}
         <span style={{ fontSize: 9, color: 'var(--mt-text-faint)', marginLeft: 'auto' }}>
-          认知截至 t{row.as_of_tick}
+          认知截至 t{row.as_of_tick} · {relRows.length} 条关系
         </span>
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -169,6 +204,26 @@ function SubjectCard({ row, self }: { row: BeliefRow; self: boolean }) {
           )}
         </tbody>
       </table>
+      {relRows.length > 0 && (
+        <div style={{ padding: '6px 9px', borderTop: '1px solid var(--mt-border)', background: '#fafafa' }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--mt-text-muted)', marginBottom: 4 }}>关系</div>
+          {relRows.map(({ key, believed, truth, diff }) => {
+            const st = DIFF_STYLE[diff];
+            return (
+              <div key={key} style={{ fontSize: 10, marginBottom: 3, color: st.color }}>
+                <span style={{ fontWeight: diff === 'stale' ? 600 : 400 }}>
+                  {believed?.label || '—'}
+                </span>
+                {diff !== 'match' && truth?.label && (
+                  <span style={{ color: 'var(--mt-text-muted)', marginLeft: 6 }}>
+                    → 真相：{truth.label}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -177,5 +232,5 @@ const cellHead: React.CSSProperties = {
   textAlign: 'left', fontWeight: 500, fontSize: 10, padding: '3px 9px',
 };
 const cell: React.CSSProperties = {
-  padding: '3px 9px', verticalAlign: 'top', wordBreak: 'break-word',
+  padding: '3px 9px', verticalAlign: 'top', lineHeight: 1.4,
 };

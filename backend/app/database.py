@@ -18,6 +18,8 @@ if DATABASE_URL.startswith("sqlite"):
     def _enable_sqlite_fk(dbapi_conn, _connection_record):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=60000")
         cursor.close()
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -29,6 +31,23 @@ class Base(DeclarativeBase):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_migrate_schema)
+
+
+def _migrate_schema(sync_conn):
+    """Lightweight schema patches for existing SQLite databases."""
+    import sqlalchemy as sa
+    insp = sa.inspect(sync_conn)
+    if "beliefs" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("beliefs")}
+    if "simulation_id" not in cols:
+        sync_conn.execute(sa.text(
+            "ALTER TABLE beliefs ADD COLUMN simulation_id VARCHAR"
+        ))
+        sync_conn.execute(sa.text(
+            "CREATE INDEX IF NOT EXISTS ix_beliefs_simulation_id ON beliefs(simulation_id)"
+        ))
 
 
 async def get_db():

@@ -59,6 +59,35 @@ function _closeStream() {
   }
 }
 
+/** Merge a tick into the feed — one row per tick number; newer payload wins. */
+function _upsertTick(ticks: SimTick[], incoming: SimTick): SimTick[] {
+  const next = ticks.filter((t) => t.tick !== incoming.tick && t.id !== incoming.id);
+  next.push(incoming);
+  return next.sort((a, b) => a.tick - b.tick);
+}
+
+/** Collapse duplicate tick numbers from API (legacy race rows). */
+function _dedupeTicksByNumber(ticks: SimTick[]): SimTick[] {
+  const byTick = new Map<number, SimTick>();
+  for (const t of ticks) byTick.set(t.tick, t);
+  return [...byTick.values()].sort((a, b) => a.tick - b.tick);
+}
+
+async function _syncTicksFromServer(projectId: string, simId: string) {
+  try {
+    const all = await api.getTicks(projectId, simId);
+    const ticks = _dedupeTicksByNumber(all.filter((t: SimTick) => t.tick > 0));
+    useSimStore.setState((s) => {
+      const sim = s.sim
+        ? { ...s.sim, current_tick: ticks.length ? ticks[ticks.length - 1].tick : s.sim.current_tick }
+        : s.sim;
+      return { ticks, sim, sims: sim ? s.sims.map((x) => (x.id === sim.id ? sim : x)) : s.sims };
+    });
+  } catch {
+    /* best-effort reconcile */
+  }
+}
+
 export const useSimStore = create<SimState>((set, get) => ({
   sims: [],
   sim: null,
@@ -95,7 +124,7 @@ export const useSimStore = create<SimState>((set, get) => ({
         api.getTicks(projectId, simId),
       ]);
       // Skip the tick-0 baseline row in the narrative feed.
-      set({ sim, ticks: ticks.filter((t) => t.tick > 0), scrubTick: null, isPlaying: sim.status === 'running' });
+      set({ sim, ticks: _dedupeTicksByNumber(ticks.filter((t) => t.tick > 0)), scrubTick: null, isPlaying: sim.status === 'running' });
       if (sim.status === 'running') get()._subscribe();
     } catch (e: any) {
       set({ error: String(e?.message || e) });
@@ -118,14 +147,14 @@ export const useSimStore = create<SimState>((set, get) => ({
   step: async () => {
     const projectId = useAppStore.getState().project?.id;
     const sim = get().sim;
-    if (!projectId || !sim || get().stepping) return;
+    if (!projectId || !sim || get().stepping || get().isPlaying || sim.status === 'running') return;
     set({ stepping: true, error: null });
     try {
       const res = await api.stepSimulation(projectId, sim.id);
       set((s) => ({
         sim: res.simulation,
         sims: s.sims.map((x) => (x.id === res.simulation.id ? res.simulation : x)),
-        ticks: [...s.ticks, res.tick],
+        ticks: _upsertTick(s.ticks, res.tick),
         stepping: false,
       }));
       // A tick mutated canonical Entity/Relation rows — refresh the main graph
@@ -139,19 +168,20 @@ export const useSimStore = create<SimState>((set, get) => ({
   play: async () => {
     const projectId = useAppStore.getState().project?.id;
     const sim = get().sim;
-    if (!projectId || !sim) return;
-    set({ error: null });
+    if (!projectId || !sim || get().isPlaying) return;
+    set({ error: null, isPlaying: true, scrubTick: null });
+    // Subscribe before the loop starts so the first tick is not missed.
+    get()._subscribe();
     try {
       const res = await api.playSimulation(projectId, sim.id);
       set((s) => ({
         sim: res.simulation,
         sims: s.sims.map((x) => (x.id === res.simulation.id ? res.simulation : x)),
         isPlaying: true,
-        scrubTick: null,
       }));
-      get()._subscribe();
     } catch (e: any) {
-      set({ error: String(e?.message || e) });
+      _closeStream();
+      set({ isPlaying: false, error: String(e?.message || e) });
     }
   },
 
@@ -217,14 +247,15 @@ export const useSimStore = create<SimState>((set, get) => ({
     _closeStream();
     const es = new EventSource(api.streamUrl(projectId, sim.id));
     _es = es;
+    es.onopen = () => {
+      void _syncTicksFromServer(projectId, sim.id);
+    };
     es.onmessage = (ev) => {
       let msg: any;
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.type === 'tick' && msg.tick) {
         set((s) => {
-          // De-dupe in case of reconnection overlap.
-          const exists = s.ticks.some((t) => t.tick === msg.tick.tick);
-          const ticks = exists ? s.ticks : [...s.ticks, msg.tick];
+          const ticks = _upsertTick(s.ticks, msg.tick);
           const sim = s.sim ? { ...s.sim, current_tick: msg.tick.tick } : s.sim;
           return { ticks, sim, sims: s.sims.map((x) => (sim && x.id === sim.id ? sim : x)) };
         });
@@ -235,16 +266,18 @@ export const useSimStore = create<SimState>((set, get) => ({
         set({ isPlaying: false });
         const pid = useAppStore.getState().project?.id;
         const sid = get().sim?.id;
-        if (pid && sid) api.getSimulation(pid, sid).then((sim) =>
-          set((s) => ({ sim, sims: s.sims.map((x) => (x.id === sim.id ? sim : x)) }))
-        ).catch(() => {});
+        if (pid && sid) {
+          void _syncTicksFromServer(pid, sid);
+          api.getSimulation(pid, sid).then((sim) =>
+            set((s) => ({ sim, sims: s.sims.map((x) => (x.id === sim.id ? sim : x)) }))
+          ).catch(() => {});
+        }
       } else if (msg.type === 'error') {
         set({ error: msg.message || 'simulation loop error' });
       }
     };
     es.onerror = () => {
-      // EventSource auto-reconnects; if the loop already paused server-side,
-      // the next select/poll will reconcile status.
+      // EventSource auto-reconnects; onopen will reconcile ticks from the server.
     };
   },
 

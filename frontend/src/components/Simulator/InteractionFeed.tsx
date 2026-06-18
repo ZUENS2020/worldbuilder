@@ -21,6 +21,10 @@ function mutationLabel(m: any): string {
       return `新实体 ${m.name}（${m.type}）`;
     case 'create_event':
       return `⚡ 事件「${m.name}」${m.summary ? `：${m.summary}` : ''}`;
+    case 'register_pending_event':
+      return `🕓 悬决「${m.name}」${m.stakes ? `：${m.stakes}` : ''}`;
+    case 'resolve_event':
+      return `✅ 结算「${m.name}」${m.outcome ? `：${m.outcome}` : ''}`;
     case undefined:
       return JSON.stringify(m);
     default:
@@ -50,6 +54,11 @@ function TickCard({ t, highlight }: { t: SimTick; highlight?: boolean }) {
         </span>
         <span style={{ fontSize: 10, color: 'var(--mt-text-faint)' }}>
           {m.encounters ?? interactions.length} 次相遇 · {mutations.length} 处演化
+          {m.resolved_events ? ` · 结算 ${m.resolved_events}` : ''}
+          {m.pending_registered ? ` · 新悬决 ${m.pending_registered}` : ''}
+          {m.pending_registered_from_drought ? ` · 补种 ${m.pending_registered_from_drought}` : ''}
+          {m.pending_drought ? ' · 悬决空窗' : ''}
+          {m.oracle_fallback ? ` · 裁决补全(${m.oracle_fallback})` : ''}
           {m.latency_ms != null ? ` · ${(m.latency_ms / 1000).toFixed(1)}s` : ''}
         </span>
       </div>
@@ -67,17 +76,26 @@ function TickCard({ t, highlight }: { t: SimTick; highlight?: boolean }) {
 
       {mutations.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-          {mutations.map((mu: any, i: number) => (
-            <span key={i} style={{
-              fontSize: 10,
-              color: mu.error ? '#c0392b' : mu.op === 'create_event' ? '#b3690f' : 'var(--mt-text-muted)',
-              background: mu.op === 'create_event' ? '#fdf2e2' : 'var(--mt-window)',
-              border: `1px solid ${mu.op === 'create_event' ? '#e8b877' : 'var(--mt-border)'}`,
-              borderRadius: 3, padding: '1px 6px',
-            }}>
-              {mutationLabel(mu)}
-            </span>
-          ))}
+          {mutations.map((mu: any, i: number) => {
+            const isEvent = mu.op === 'create_event';
+            const isPending = mu.op === 'register_pending_event';
+            const isResolve = mu.op === 'resolve_event';
+            let color = 'var(--mt-text-muted)';
+            let bg = 'var(--mt-window)';
+            let border = 'var(--mt-border)';
+            if (mu.error) { color = '#c0392b'; }
+            else if (isResolve) { color = '#1f7a4d'; bg = '#e6f6ec'; border = '#9bd3b4'; }
+            else if (isPending) { color = '#5a4ba8'; bg = '#efecfb'; border = '#c3b8ec'; }
+            else if (isEvent) { color = '#b3690f'; bg = '#fdf2e2'; border = '#e8b877'; }
+            return (
+              <span key={i} style={{
+                fontSize: 10, color, background: bg,
+                border: `1px solid ${border}`, borderRadius: 3, padding: '1px 6px',
+              }}>
+                {mutationLabel(mu)}
+              </span>
+            );
+          })}
         </div>
       )}
     </div>
@@ -88,6 +106,7 @@ export default function InteractionFeed() {
   const ticks = useSimStore((s) => s.ticks);
   const stepping = useSimStore((s) => s.stepping);
   const scrubTick = useSimStore((s) => s.scrubTick);
+  const lastTickId = ticks[ticks.length - 1]?.id;
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -100,7 +119,7 @@ export default function InteractionFeed() {
       return;
     }
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [ticks.length, stepping, scrubTick]);
+  }, [ticks.length, lastTickId, stepping, scrubTick]);
 
   if (ticks.length === 0 && !stepping) {
     return (

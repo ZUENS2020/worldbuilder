@@ -6,6 +6,7 @@ Usage:
   WORLDBUILDER_API=http://localhost:8090/api python3 import_world.py sanguo_data
 
 Data module must export: PROJECT, ENTITIES, RELATIONS
+Optional: WORLD_ENTRIES (list of lore entries; entity_keys resolved at import)
 """
 
 from __future__ import annotations
@@ -105,6 +106,33 @@ def import_module(module_name: str) -> None:
         rel_count += 1
 
     print(f"Created {rel_count} relations ({skipped} skipped)")
+
+    world_entries = getattr(mod, "WORLD_ENTRIES", None)
+    if world_entries:
+        wb_count = 0
+        for entry in world_entries:
+            entity_ids = [
+                key_to_id[k]
+                for k in entry.get("entity_keys", [])
+                if k in key_to_id
+            ]
+            request(
+                "POST",
+                f"/projects/{pid}/world-entries",
+                {
+                    "title": entry.get("title", ""),
+                    "content": entry.get("content", ""),
+                    "scope": entry.get("scope", "global"),
+                    "entity_ids": entity_ids,
+                    "keys": entry.get("keys", []),
+                    "priority": entry.get("priority", 0),
+                    "enabled": entry.get("enabled", 1),
+                    "properties": entry.get("properties", {}),
+                },
+            )
+            wb_count += 1
+        print(f"Created {wb_count} world book entries")
+
     print(f"\nDone! Project ID: {pid}")
 
 

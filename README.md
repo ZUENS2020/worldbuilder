@@ -15,7 +15,7 @@ WorldBuilder 是一个以**知识图谱为核心**的世界观构建与调查平
 
 WorldBuilder 用**图距离驱动的精准上下文注入**取代关键词匹配：只把与当前出场角色 N-hop 内相关的设定喂给 AI（跳数可在设置中按场景分别配置），token 高效，且能主动预警设定矛盾。
 
-此外，内置 **Agent 关系演化模拟器**（战争迷雾、信念层、戏剧增强）与 **SillyTavern 插件**（上下文注入 + 对话回写），把图谱、模拟记忆与角色扮演对话打通。
+此外，内置 **Agent 关系演化模拟器**（因果推演、战争迷雾、信念层）与 **SillyTavern 插件**（上下文注入 + 对话回写），把图谱、模拟记忆与角色扮演对话打通。
 
 ---
 
@@ -24,9 +24,10 @@ WorldBuilder 用**图距离驱动的精准上下文注入**取代关键词匹配
 - [核心能力](#-核心能力)
 - [快速开始](#-快速开始)
 - [导入世界观数据](#-导入世界观数据)
+- [模拟器：推演机制](#-模拟器推演机制)
 - [导入 / 导出](#-导入--导出)
 - [SillyTavern 插件](#-sillytavern-插件)
-- [联调测试](#-st--wb-联调测试)
+- [联调与回归测试](#-联调与回归测试)
 - [Cursor Skills](#-cursor-skills)
 - [技术栈](#-技术栈)
 - [API 端点](#-api-端点节选)
@@ -65,7 +66,12 @@ WorldBuilder 用**图距离驱动的精准上下文注入**取代关键词匹配
 
 ### Agent 关系演化模拟器
 
-模拟器以 **tick** 为单位推进世界：调度相遇 → Actor 行动 → Oracle 裁决 → 关系/状态突变 → 情景记忆 → 快照回放。
+模拟器以 **tick** 为单位推进世界，定位是**因果推演引擎**，而非剧情导演：
+
+```
+调度相遇 → Actor（角色主观行动）→ Oracle（世界裁决）
+  → 关系/状态/事件突变 → 信念同步 → 情景记忆 → SimTick 快照
+```
 
 | 能力 | 说明 |
 |------|------|
@@ -75,21 +81,16 @@ WorldBuilder 用**图距离驱动的精准上下文注入**取代关键词匹配
 | **信念层** | 每角色维护主观世界副本；**信念 / 真相** 面板对照过时认知与 canonical 真相 |
 | **世界书** | 图锚定硬检索（`global` 常驻 + `entity` 挂载），按在场实体注入 |
 | **启发扰动（Nudge）** | 随机 / 指定 / 按人脉向角色注入模糊预感，打破僵局 |
+| **悬决事件 & 推演结算** | 预设或自主登记的 `pending` 事件，因果成熟后 `resolve` 落下不可逆后果 |
 | **事件结晶** | Oracle 将重要转折凝结为事件节点，互动流中以芯片展示 |
 | **ST 回写** | SillyTavern 对话先入队，在 **「ST 回写」** 标签审阅后手动 / 每 N 轮 / 自动 LLM 落库 |
 
-#### 戏剧增强系统
+#### 设计原则
 
-四套可独立开关的机制，由统一强度档位（0–1）缩放，避免模拟陷入 endless 寒暄：
-
-| 机制 | 开关 | 作用 |
-|------|------|------|
-| **演员** | `drama_actor` | 鼓励决定性行动与冲突，而非客套寒暄 |
-| **裁决** | `drama_oracle` | 放开关系变化幅度，允许决裂 / 翻脸一步到位 |
-| **调度** | `drama_scheduler` | 主动撮合敌对 / 陌生角色制造对抗 |
-| **事件注入** | `drama_event_injector` | 周期性注入外部突发事件（危机、介入、抉择等） |
-| **张力累积** | `drama_tension` | 敌对关系见面无实质变化则积压张力，临界强制爆发 |
-| **导演** | `drama_director` | 全局导演周期性升级一条冲突弧线 |
+- **LLM = 角色决策 + 世界裁决**，不是编剧；prompt 强调因果合理性，而非戏剧张力
+- **预设锚点仅作冷启动**；`sequence_order` 约束导入时的引导事件顺序，之后由角色目标驱动自主登记新悬决
+- **无终局检测** —— 不设三幕结构或自动结局；世界可持续演化
+- **Actor 信息不对称** —— 每场相遇只从发起方信念副本叙事，对手信念事后机械同步
 
 ### SillyTavern 桥接
 
@@ -115,6 +116,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 后端启动在 http://localhost:8000（SQLite 数据库自动创建）。
+
+> 若提示 `Address already in use`，说明已有实例在跑：`lsof -ti:8000 | xargs kill` 后再启动。
 
 ### 2. 前端
 
@@ -152,32 +155,101 @@ cd scripts
 python3 import_world.py sanguo_data
 ```
 
-数据模块需导出 `PROJECT`、`ENTITIES`、`RELATIONS` 三个常量。仓库内置**三国演义**示例（137 实体、177 关系）：
+数据模块需导出 `PROJECT`、`ENTITIES`、`RELATIONS` 三个常量。
+
+### 内置示例
 
 | 文件 | 说明 |
 |------|------|
-| `scripts/sanguo_data.py` | 演义原著人物、阵营、战役与关系 |
+| `scripts/sanguo_data.py` | 三国演义（137 实体、177 关系） |
 | `scripts/seed_sanguo.py` | 薄封装，等价于 `import_world.py sanguo_data` |
+| `scripts/sim_test_data.py` | 模拟器最小测试（3 人 + 茶馆 + 失窃案） |
+| `scripts/seed_sim_test.py` | 薄封装导入最小测试图谱 |
+| `scripts/manor_mystery_data.py` | **雾港·黎氏庄园** — 8 角色悬疑封闭局，含 3 个预设悬决锚点 |
+| `scripts/evolution_test_data.py` | 演进测试图谱（验证自主事件登记与目标驱动） |
+| `scripts/seed_evolution_test.py` | 薄封装导入演进测试 |
+
+```bash
+# 悬疑封闭局（推荐用于跑模拟器）
+python3 import_world.py manor_mystery_data
+
+# 演进机制测试
+python3 import_world.py evolution_test_data
+```
 
 Docker 环境指定 API 地址：
 
 ```bash
-WORLDBUILDER_API=http://localhost:8090/api python3 import_world.py sanguo_data
+WORLDBUILDER_API=http://localhost:8090/api python3 import_world.py manor_mystery_data
 ```
 
 同名项目已存在时会先删除再重建。新建世界观：复制 `sanguo_data.py` 改写成 `myworld_data.py` 后导入即可。
 
-**模拟器最小测试图谱**（3 人 + 茶馆 + 失窃案，含 private 秘密属性）：
+数据模块可为事件节点附加推演元数据：
 
-```bash
-cd scripts
-python3 seed_sim_test.py
+```python
+{
+    "name": "真遗嘱浮现",
+    "type": "event",
+    "properties": {
+        "status": "pending",
+        "stakes": "继承格局彻底反转…",
+        "due_tick": 10,
+        "sequence_order": 2,  # 仅约束预设引导锚点的结算顺序
+    },
+}
 ```
 
-| 文件 | 说明 |
+---
+
+## 🎲 模拟器：推演机制
+
+### 一次 tick 的流程
+
+1. **Nudge**（可选）—— 向选定角色注入模糊预感
+2. **Scheduler** —— 按人脉权重 / 随机 / 冲突撮合挑选相遇对
+3. **Actor** —— 每场相遇由发起方信念上下文生成叙事与意图
+4. **Oracle** —— 整 tick 裁决：关系突变、事件结晶、悬决登记、`ripe_events` 信号
+5. **推演结算** —— 因果成熟的 `pending` 事件调用 `ai_resolve_event` 落下后果
+6. **信念同步** —— 参与者互相更新主观副本
+7. **记忆写入** —— 情景记忆追加，超阈值时压缩
+8. **SimTick 快照** —— 完整 interactions / mutations / metrics 落库
+
+### 悬决事件生命周期
+
+| 阶段 | 说明 |
 |------|------|
-| `scripts/sim_test_data.py` | 林远 / 小夏 / 阿明 等最小场景 |
-| `scripts/seed_sim_test.py` | 薄封装导入器 |
+| `pending` | 登记时写入 `stakes`、`due_tick`（可选）、`sequence_order`（预设锚点） |
+| Oracle `ripe` | LLM 判断因果成熟；`due_tick` 前 ripe 信号无效 |
+| `resolve` | 结算后 `status=resolved`，写入 `outcome`，产生不可逆突变 |
+| 自主登记 | 角色目标冲突扫描 / 悬决空窗补种 / intent 兜底，无需人工预埋 |
+
+### 关键配置项（`Simulation.config`）
+
+| 键 | 默认 | 说明 |
+|----|------|------|
+| `max_encounters_per_tick` | 4 | 每 tick 最多几场相遇 |
+| `scheduler_mix_conflict` | false | 额外撮合一对敌对/陌生角色 |
+| `generate_events` | true | Oracle 是否结晶事件节点 |
+| `pending_max_age` | 8 | 悬决超时强制结算（0=关闭） |
+| `nudge_strategy` | off | 扰动策略：off / random / targeted / weighted |
+| `tick_interval_sec` | 6 | 自动演化间隔（秒） |
+| `max_ticks` | 0 | 自动暂停上限（0=不限） |
+| `stability_window` | 0 | 连续无突变 tick 后自动暂停 |
+
+### 推荐工作流（雾港·黎氏庄园）
+
+```bash
+cd scripts && python3 import_world.py manor_mystery_data
+```
+
+1. 前端打开 **雾港·黎氏庄园** 项目
+2. 模拟器 → **＋ 新建模拟**（hybrid 模式）
+3. **单步 ⏭** 逐步观察，或 **▶ 自动演化** 后台推进（SSE 实时更新互动流）
+4. 在 **信念 / 真相** 面板切换观察者，对照主观认知与 canonical 真相
+5. 事件图 / 时间轴查看因果链 `followed_by` 如何生长
+
+预设三个锚点（`sequence_order` 1→2→3）应在因果链上依次结算：**遗嘱宣读 → 真遗嘱浮现 → 死因鉴定结论**。之后世界由角色目标驱动继续演化。
 
 ---
 
@@ -254,7 +326,9 @@ GENERATION_END（可选）
 
 ---
 
-## 🧪 ST + WB 联调测试
+## 🧪 联调与回归测试
+
+### ST + WB 联调
 
 ```bash
 # 终端 1：WB 后端
@@ -273,7 +347,13 @@ node scripts/create_st_characters.mjs [SillyTavern根目录]
 # 默认写入 <ST>/data/default-user/characters/
 ```
 
-在 ST 中选对应角色卡，扩展里绑定「模拟器测试」项目即可联调。完整手测清单见 [`st-plugin/TESTING.md`](st-plugin/TESTING.md)。
+### 推演引擎回归（无需 LLM）
+
+```bash
+cd scripts
+python3 deduction_regression_test.py    # 悬决成熟 / sequence_order / 自主登记逻辑
+python3 sim_engine_regression_test.py # 模拟器核心路径
+```
 
 ---
 
@@ -296,7 +376,7 @@ node scripts/create_st_characters.mjs [SillyTavern根目录]
 | 后端 | Python 3.13 + FastAPI + Uvicorn |
 | 数据/图存储 | SQLite + SQLAlchemy（async）+ 内存邻接表图引擎 |
 | AI | OpenRouter（OpenAI 兼容，模型可配置） |
-| 模拟器 | Actor / Oracle 双阶段 LLM + SSE 流式推送 |
+| 模拟器 | Actor / Oracle 双阶段 LLM + 因果推演 + SSE 流式推送 |
 | ST 插件 | SillyTavern 1.18 Extension API |
 
 ---
@@ -313,7 +393,7 @@ node scripts/create_st_characters.mjs [SillyTavern根目录]
 | `POST` | `/api/projects/{id}/beliefs/seed` | 幂等播种信念行 |
 | `GET`  | `/api/projects/{id}/beliefs/context` | ST 信念上下文 |
 | `POST` | `/api/projects/{id}/simulations` | 创建模拟 |
-| `POST` | `/api/projects/{id}/simulations/{sid}/step` | 单步推进 tick |
+| `POST` | `/api/projects/{id}/simulations/{sid}/step` | 单步推进 tick（运行中返回 409） |
 | `POST` | `/api/projects/{id}/simulations/{sid}/play` | 启动后台自动演化 |
 | `POST` | `/api/projects/{id}/simulations/{sid}/pause` | 暂停后台演化 |
 | `POST` | `/api/projects/{id}/simulations/{sid}/reset` | 重置到初始快照 |
@@ -337,7 +417,8 @@ world_builder/
 │   │   ├── models/           # Entity, Relation, Simulation, Belief, StWritebackQueue…
 │   │   ├── routers/          # projects, entities, relations, transforms,
 │   │   │                     #   simulations, world_entries, beliefs
-│   │   ├── services/         # ai_service, simulation, belief, memory, drama, st_writeback
+│   │   ├── services/         # ai_service, simulation, belief, memory,
+│   │   │                     #   sim_runner, st_writeback
 │   │   └── graph/            # 内存图引擎、visibility、worldbook
 │   └── requirements.txt
 ├── frontend/
@@ -346,7 +427,7 @@ world_builder/
 │       ├── Canvas/, Inspector/, WorldBook/, EventGraph/, Timeline/, …
 │       └── …
 ├── st-plugin/                # SillyTavern 插件 v0.6
-├── scripts/                  # 数据导入、联调测试、ST 角色卡生成
+├── scripts/                  # 数据导入、示例图谱、联调与回归测试
 ├── docs/import-export.md
 ├── skills/
 └── docker-compose.yml

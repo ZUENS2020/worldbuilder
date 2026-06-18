@@ -44,6 +44,7 @@ async def get_belief_context(
     observer: str = Query(..., description="Observer entity name or ID"),
     characters: str = Query(..., description="Comma-separated in-scene character names or IDs"),
     hop: int = Query(None, ge=1, le=5),
+    simulation: str = Query(None, description="Simulation ID for sim-scoped beliefs"),
     db: AsyncSession = Depends(get_db),
 ):
     """Belief-filtered scene context for ST plugin (observer's subjective world copy)."""
@@ -74,6 +75,7 @@ async def get_belief_context(
 
     result = await belief.build_scene_belief_context(
         db, project_id, observer_id, entity_ids,
+        simulation_id=simulation,
         context_hop=context_hop, world_entries=world_entries,
     )
     return GraphContext(**result)

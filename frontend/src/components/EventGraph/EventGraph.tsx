@@ -61,11 +61,13 @@ function buildEventData(
   const nodes: Node[] = eventEntities.map((entity) => {
     const existing = existingPositions?.get(entity.id);
     const time = entity.properties?.time || entity.properties?.date || '';
+    const isSim = Boolean(entity.properties?._sim);
+    const isPending = entity.properties?.status === 'pending';
     return {
       id: entity.id,
       type: 'entity',
       position: existing ?? { x: 0, y: 0 },
-      data: { entity, label: entity.name, time },
+      data: { entity, label: entity.name, time, isSim, isPending },
     };
   });
 
@@ -77,7 +79,10 @@ function buildEventData(
       target: relation.target_id,
       type: 'relation',
       data: { relationType: relation.type },
-      style: { stroke: config.color, strokeWidth: 1.5 + relation.weight },
+      style: {
+        stroke: config.color,
+        strokeWidth: 1.5 + relation.weight,
+      },
       markerEnd: MarkerType.ArrowClosed,
     };
   });

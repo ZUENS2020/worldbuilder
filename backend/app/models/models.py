@@ -1,6 +1,6 @@
 """SQLAlchemy models for Entity, Relation, and Project."""
 
-from sqlalchemy import Column, String, Float, Text, DateTime, JSON, ForeignKey, Integer
+from sqlalchemy import Column, String, Float, Text, DateTime, JSON, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -105,11 +105,15 @@ class WorldEntry(Base):
 
 class Belief(Base):
     """One agent's belief about one subject — a per-agent copy of the world that
-    can be stale or wrong vs canonical truth."""
+    can be stale or wrong vs canonical truth. Scoped per simulation when simulation_id is set."""
     __tablename__ = "beliefs"
+    __table_args__ = (
+        UniqueConstraint("simulation_id", "observer_id", "subject_id", name="uq_belief_sim_observer_subject"),
+    )
 
     id = Column(String, primary_key=True)
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    simulation_id = Column(String, ForeignKey("simulations.id", ondelete="CASCADE"), nullable=True, index=True)
     observer_id = Column(String, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, index=True)
     subject_id = Column(String, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, index=True)
     believed_properties = Column(JSON, default=dict)

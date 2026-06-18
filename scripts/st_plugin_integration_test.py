@@ -81,30 +81,50 @@ def main() -> int:
 
     sims = req("GET", f"/projects/{pid}/simulations")
     sim = sims[0] if sims else None
-    if not sim:
-        print("WARN: no simulation — create one for writeback test")
+
+    # Sim-scoped beliefs: two simulations seed isolated belief rows
+    sim_a = req("POST", f"/projects/{pid}/simulations", {"driver_mode": "hybrid"})
+    sim_b = req("POST", f"/projects/{pid}/simulations", {"driver_mode": "hybrid"})
+    map_a = get(f"/projects/{pid}/simulations/{sim_a['id']}/beliefs", {"observer": "林远"})
+    map_b = get(f"/projects/{pid}/simulations/{sim_b['id']}/beliefs", {"observer": "林远"})
+    if not map_a.get("subjects") or not map_b.get("subjects"):
+        fails.append("sim-scoped beliefs: empty subject map after create")
     else:
-        sid = sim["id"]
-        mem = get(f"/projects/{pid}/simulations/{sid}/memory-block", {"entity": "林远", "recent_k": "3"})
-        print(f"OK memory-block ({mem.get('token_count', 0)} tokens)")
+        print(f"OK sim-scoped beliefs seeded (a={len(map_a['subjects'])}, b={len(map_b['subjects'])})")
 
-        q = req("POST", f"/projects/{pid}/simulations/{sid}/st-writeback/queue", {
-            "observer": "林远",
-            "partner": "小夏",
-            "user_message": "林远：阿明刚才说什么？",
-            "assistant_message": "小夏：他说看见可疑生客，但我不信。",
-            "source_meta": {"test": True},
-        })
-        if q.get("status") != "pending":
-            fails.append(f"writeback queue status {q.get('status')}")
-        else:
-            print(f"OK writeback queued r{q.get('round_index')} pending={q.get('pending_count')}")
+    ctx_sim = get(
+        f"/projects/{pid}/beliefs/context",
+        {"observer": "林远", "characters": "林远,小夏", "hop": "2", "simulation": sim_a["id"]},
+    )
+    if not ctx_sim.get("system_injection"):
+        fails.append("belief context with simulation= empty")
+    else:
+        print("OK belief context bound to simulation")
 
-        listed = get(f"/projects/{pid}/simulations/{sid}/st-writeback", {"status": "pending"})
-        if listed.get("pending_count", 0) < 1:
-            fails.append("writeback list empty")
-        else:
-            print(f"OK writeback list ({listed['pending_count']} pending)")
+    if not sim:
+        sim = sim_a
+
+    sid = sim["id"]
+    mem = get(f"/projects/{pid}/simulations/{sid}/memory-block", {"entity": "林远", "recent_k": "3"})
+    print(f"OK memory-block ({mem.get('token_count', 0)} tokens)")
+
+    q = req("POST", f"/projects/{pid}/simulations/{sid}/st-writeback/queue", {
+        "observer": "林远",
+        "partner": "小夏",
+        "user_message": "林远：阿明刚才说什么？",
+        "assistant_message": "小夏：他说看见可疑生客，但我不信。",
+        "source_meta": {"test": True},
+    })
+    if q.get("status") != "pending":
+        fails.append(f"writeback queue status {q.get('status')}")
+    else:
+        print(f"OK writeback queued r{q.get('round_index')} pending={q.get('pending_count')}")
+
+    listed = get(f"/projects/{pid}/simulations/{sid}/st-writeback", {"status": "pending"})
+    if listed.get("pending_count", 0) < 1:
+        fails.append("writeback list empty")
+    else:
+        print(f"OK writeback list ({listed['pending_count']} pending)")
 
     # ST server
     try:

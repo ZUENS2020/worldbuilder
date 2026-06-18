@@ -12,9 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.models import Simulation, SimTick, AgentMemory, Project
-from app.services.simulation import run_tick, capture_baseline, reset_simulation, DEFAULT_CONFIG
-from app.services import sim_runner
+from app.services.simulation import capture_baseline, reset_simulation, DEFAULT_CONFIG
 from app.services import belief
+from app.services import sim_runner
 from app.services.memory import get_memory_block
 from app.services import st_writeback
 from app.services.st_writeback import resolve_entity_id, merge_writeback_config
@@ -71,6 +71,7 @@ async def create_simulation(project_id: str, data: SimulationCreate, db: AsyncSe
     await db.flush()
     # Capture a full tick-0 baseline so the sim can be reset/replayed later.
     await capture_baseline(db, sim)
+    await belief.seed_beliefs(db, sim)
     await db.commit()
     await db.refresh(sim)
     return sim
@@ -100,7 +101,10 @@ async def step_simulation(project_id: str, sim_id: str, db: AsyncSession = Depen
     sim = await db.get(Simulation, sim_id)
     if not sim or sim.project_id != project_id:
         raise HTTPException(404, "Simulation not found")
-    simtick = await run_tick(db, sim)
+    if sim.status == "running" or sim_runner.is_running(sim_id):
+        raise HTTPException(409, "Simulation is running — pause before manual step")
+    simtick = await sim_runner.guarded_run_tick(db, sim)
+    await db.refresh(sim)
     return {"simulation": SimulationOut.model_validate(sim).model_dump(), "tick": _serialize_tick(simtick)}
 
 
@@ -196,7 +200,7 @@ async def list_ticks(
     stmt = select(SimTick).where(SimTick.simulation_id == sim_id).where(SimTick.tick >= from_)
     if to is not None:
         stmt = stmt.where(SimTick.tick <= to)
-    rows = (await db.execute(stmt.order_by(SimTick.tick))).scalars().all()
+    rows = (await db.execute(stmt.order_by(SimTick.tick, SimTick.created_at))).scalars().all()
     return [_serialize_tick(t) for t in rows]
 
 
@@ -204,6 +208,7 @@ async def list_ticks(
 async def get_tick(project_id: str, sim_id: str, tick: int, db: AsyncSession = Depends(get_db)):
     row = (await db.execute(
         select(SimTick).where(SimTick.simulation_id == sim_id).where(SimTick.tick == tick)
+        .order_by(SimTick.created_at.desc()).limit(1)
     )).scalar_one_or_none()
     if not row:
         raise HTTPException(404, "Tick not found")
@@ -218,7 +223,7 @@ async def get_beliefs(
     """One observer's beliefs paired with canonical truth, for the belief-vs-truth
     comparison view. Diffs (stale / wrong / unknown) are computed on the frontend."""
     observer_id = resolve_entity_id(project_id, observer) or observer
-    return await belief.get_belief_map(db, project_id, observer_id)
+    return await belief.get_belief_map(db, project_id, observer_id, simulation_id=sim_id)
 
 
 @router.get("/{sim_id}/memory")

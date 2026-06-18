@@ -41,15 +41,18 @@ export default function Timeline() {
       .filter(Boolean) as (Entity & { role: string })[];
   };
 
-  // Get all entities with time properties
   const timedEntities = useMemo(() => {
-    return entities.filter((e) =>
-      e.properties?.time || e.properties?.date || e.properties?.year
-    ).sort((a, b) => {
-      const timeA = a.properties?.time || a.properties?.date || a.properties?.year || '';
-      const timeB = b.properties?.time || b.properties?.date || b.properties?.year || '';
-      return timeA.localeCompare(timeB);
-    });
+    const sortKey = (e: Entity) => {
+      const simMeta = e.properties?._sim as { tick?: number } | undefined;
+      if (simMeta?.tick != null) {
+        return `${String(simMeta.tick).padStart(6, '0')}-2`;
+      }
+      const time = e.properties?.time || e.properties?.date || e.properties?.year || '';
+      return `000000-0-${time}`;
+    };
+    return entities
+      .filter((e) => e.properties?.time || e.properties?.date || e.properties?.year || e.properties?._sim)
+      .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
   }, [entities]);
 
   return (
@@ -78,6 +81,8 @@ export default function Timeline() {
             {timedEntities.map((entity, i) => {
               const config = ENTITY_CONFIG[entity.type] || ENTITY_CONFIG.event;
               const time = entity.properties?.time || entity.properties?.date || entity.properties?.year || '?';
+              const status = entity.properties?.status as string | undefined;
+              const simTick = (entity.properties?._sim as { tick?: number } | undefined)?.tick;
               const participants = entity.type === 'event' ? getParticipants(entity.id) : [];
               const isSelected = selectedEntityIds.includes(entity.id);
 
@@ -120,7 +125,14 @@ export default function Timeline() {
                     fontWeight: 600,
                   }}>
                     {time}
+                    {simTick != null && <span style={{ color: 'var(--mt-text-faint)' }}> · t{simTick}</span>}
                   </div>
+                  {status === 'pending' && (
+                    <div style={{ fontSize: 8, color: '#5a4ba8', marginBottom: 2 }}>🕓 悬决</div>
+                  )}
+                  {status === 'resolved' && (
+                    <div style={{ fontSize: 8, color: '#1f7a4d', marginBottom: 2 }}>✅ 已结算</div>
+                  )}
 
                   {/* Entity name */}
                   <div
