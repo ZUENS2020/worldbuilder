@@ -44,3 +44,4 @@ __pycache__/
 
 # Claude Code session data
 .claude/worktrees/
+reminder_list
