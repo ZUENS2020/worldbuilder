@@ -83,6 +83,8 @@ export const api = {
   },
   getMemory: (projectId: string, simId: string, entityId: string) =>
     request<any[]>(`/projects/${projectId}/simulations/${simId}/memory?entity=${entityId}`),
+  getBeliefs: (projectId: string, simId: string, observerId: string) =>
+    request<any[]>(`/projects/${projectId}/simulations/${simId}/beliefs?observer=${observerId}`),
 
   // World Book (P3)
   listWorldEntries: (projectId: string) =>

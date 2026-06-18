@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSimStore } from '../../stores/simStore';
 import { useAppStore } from '../../stores/appStore';
 import InteractionFeed from './InteractionFeed';
+import BeliefPanel from './BeliefPanel';
 
 export default function SimulatorPanel() {
   const { sims, sim, stepping, error, loadSims, selectSim, createSim, step, reset } = useSimStore();
   const projectId = useAppStore((s) => s.project?.id);
+  const [tab, setTab] = useState<'feed' | 'belief'>('feed');
 
   // Reload the simulation list whenever the active project changes.
   useEffect(() => {
@@ -62,19 +64,41 @@ export default function SimulatorPanel() {
           </>
         )}
 
+        {sim && (
+          <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+            <button
+              className={`mt-btn${tab === 'feed' ? ' active' : ''}`}
+              style={{ fontSize: 11, padding: '3px 10px' }}
+              onClick={() => setTab('feed')}
+            >
+              世界事件
+            </button>
+            <button
+              className={`mt-btn${tab === 'belief' ? ' active' : ''}`}
+              style={{ fontSize: 11, padding: '3px 10px' }}
+              onClick={() => setTab('belief')}
+              title="对照某角色的信念副本与世界真相（信息差 / 战争迷雾）"
+            >
+              信念 / 真相
+            </button>
+          </div>
+        )}
+
         {error && (
-          <span style={{ fontSize: 11, color: '#c0392b', marginLeft: 'auto' }}>⚠️ {error}</span>
+          <span style={{ fontSize: 11, color: '#c0392b', marginLeft: sim ? 8 : 'auto' }}>⚠️ {error}</span>
         )}
       </div>
 
-      {/* Feed */}
+      {/* Body */}
       <div style={{ flex: 1, minHeight: 0 }}>
         {!sim ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--mt-text-faint)', fontSize: 12 }}>
             还没有模拟。点击「＋ 新建模拟」创建一个，然后单步推进让角色网络自行演化。
           </div>
-        ) : (
+        ) : tab === 'feed' ? (
           <InteractionFeed />
+        ) : (
+          <BeliefPanel />
         )}
       </div>
     </div>

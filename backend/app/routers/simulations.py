@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.models import Simulation, SimTick, AgentMemory, Project
 from app.services.simulation import run_tick, DEFAULT_CONFIG
+from app.services import belief
 
 router = APIRouter(prefix="/api/projects/{project_id}/simulations", tags=["simulations"])
 
@@ -116,6 +117,16 @@ async def get_tick(project_id: str, sim_id: str, tick: int, db: AsyncSession = D
     if not row:
         raise HTTPException(404, "Tick not found")
     return _serialize_tick(row)
+
+
+@router.get("/{sim_id}/beliefs")
+async def get_beliefs(
+    project_id: str, sim_id: str, observer: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """One observer's beliefs paired with canonical truth, for the belief-vs-truth
+    comparison view. Diffs (stale / wrong / unknown) are computed on the frontend."""
+    return await belief.get_belief_map(db, project_id, observer)
 
 
 @router.get("/{sim_id}/memory")

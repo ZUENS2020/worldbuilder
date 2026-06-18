@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import Entity, Relation, Simulation, SimTick, WorldEntry
 from app.graph.engine import graph_engine
 from app.services import ai_service
+from app.services import belief
 from app.services.memory import append_memory, get_memory_block, maybe_compact
 
 
@@ -310,7 +311,8 @@ async def _build_snapshot(db: AsyncSession, sim: Simulation) -> dict:
             continue
         snap = {k: (e.properties or {}).get(k) for k in _MUTABLE if (e.properties or {}).get(k)}
         entities.append({"id": e.id, "name": e.name, "type": e.type, "state": snap})
-    return {"relations": relations, "entities": entities}
+    beliefs = await belief.snapshot_beliefs(db, pid)
+    return {"relations": relations, "entities": entities, "beliefs": beliefs}
 
 
 # ── public API ───────────────────────────────────────────────────
@@ -335,20 +337,25 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
     )
     world_entries = we_result.scalars().all()
 
+    # P4: ensure each character has a starting belief copy (idempotent).
+    await belief.seed_beliefs(db, sim)
+
     # 1. scheduler
     encounters = _pick_encounters(sim)
     metrics["encounters"] = len(encounters)
 
-    # 2. Actor passes (one per encounter; full-knowledge context in P1)
+    # 2. Actor passes — each encounter is narrated from the INITIATOR's belief
+    #    copy (stale/partial), not canonical truth. Info asymmetry is preserved
+    #    by sourcing the scene from a single observer; the other party's beliefs
+    #    are reconciled mechanically afterward (step 6).
     scenes = []
     for a_id, b_id in encounters:
         a = graph_engine.entities.get(a_id)
         b = graph_engine.entities.get(b_id)
         if not a or not b:
             continue
-        ctx = graph_engine.get_context(
-            [a_id, b_id], project_id=sim.project_id, context_hop=2,
-            world_entries=world_entries,
+        ctx = await belief.build_actor_context(
+            db, sim, a_id, b_id, world_entries=world_entries,
         )
         mem_blocks = {
             a.name: await get_memory_block(db, simulation_id=sim.id, entity_id=a_id, recent_k=recent_k),
@@ -385,6 +392,28 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
         )
     metrics["mutation_count"] = len(applied_mutations)
 
+    # 3c. Oracle belief re-cognition — when a property was just opened to a
+    #     specific whitelist, fold the newly-revealed truth into each of those
+    #     observers' beliefs and let them re-derive their goal.
+    name_idx = _name_index(sim.project_id)
+    for m in applied_mutations:
+        if m.get("op") != "set_prop_visibility" or m.get("level") != "entities":
+            continue
+        subject = name_idx.get(m.get("entity"))
+        key = m.get("key")
+        if not subject or not key:
+            continue
+        truth_val = (subject.properties or {}).get(key)
+        if truth_val in (None, "", [], {}):
+            continue
+        for observer_id in (m.get("entities") or []):
+            if observer_id == subject.id:
+                continue
+            await belief.reconcile_belief(
+                db, sim, observer_id, subject.id, {key: truth_val}, config=config,
+            )
+            metrics["llm_calls"] += 1
+
     # 5. episodic memory append + 6. compaction
     for s in scenes:
         for name, eid in zip(s["participants"], s["participant_ids"]):
@@ -400,6 +429,17 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
                 db, simulation_id=sim.id, project_id=sim.project_id, entity_id=eid,
                 threshold=threshold, config=config,
             )
+
+    # 6. mechanical belief sync — each participant perceives the other (and
+    #    itself); copy currently-visible truth into their belief at this tick.
+    perceptions: list[tuple[str, str]] = []
+    for s in scenes:
+        ids = s["participant_ids"]
+        for observer_id in ids:
+            for subject_id in ids:
+                perceptions.append((observer_id, subject_id))
+    if perceptions:
+        await belief.sync_beliefs(db, sim, tick, perceptions)
 
     # 7. snapshot + SimTick row
     snapshot = await _build_snapshot(db, sim)

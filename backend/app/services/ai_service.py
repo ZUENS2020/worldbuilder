@@ -403,6 +403,60 @@ async def ai_resolve_visibility(
         return {"prop_key": None, "content": None, "matched_entities": [], "error": str(e)}
 
 
+async def ai_reconcile_belief(
+    observer_name: str,
+    subject_name: str,
+    believed_props: dict,
+    revealed_truth: dict,
+    *,
+    self_goal: str | None = None,
+    config: dict | None = None,
+    temperature: float = 0.4,
+) -> dict:
+    """Oracle belief-reconciliation pass (plan decision 10c / step 3c).
+
+    A previously-hidden truth about ``subject_name`` just became visible to
+    ``observer_name`` (visibility opened). Fold the revealed facts into the
+    observer's belief about that subject, and — if the revelation matters —
+    re-derive the observer's own goal in light of the new knowledge.
+
+    Returns {"belief_updates": {key: value}, "goal": str|None}. ``belief_updates``
+    is merged into the observer's believed_properties about the subject; ``goal``
+    (when non-empty) replaces the observer's own goal.
+    """
+    prompt = f"""你是关系演化模拟器的「全知信念重认知器」(Oracle)。某角色刚刚获知了关于另一个角色的、此前不知道的真相，请把新真相折进 TA 的认知，并判断 TA 的目标是否因此改变。
+
+【观察者】{observer_name}
+【观察者当前目标】{self_goal or '（未知）'}
+【认知对象】{subject_name}
+【观察者原本对 TA 的认知】{json.dumps(believed_props, ensure_ascii=False)}
+【刚刚揭示的真相】{json.dumps(revealed_truth, ensure_ascii=False)}
+
+请输出：
+- belief_updates：要写进观察者认知里的键值（把揭示的真相合理地并入，键名沿用真相里的键）。
+- goal：如果这条真相会让观察者改变目标，给出新目标（一句话）；若不影响，置为 null。
+
+只返回 JSON：
+{{"belief_updates": {{"key": "value"}}, "goal": "新目标或 null"}}"""
+    messages = [
+        {"role": "system", "content": "你是全知信念重认知器，把新揭示的真相折进观察者的认知并据此重定目标。只返回JSON。"},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        result = await call_ai(messages, config=config, temperature=temperature, max_tokens=512)
+        parsed = json.loads(_strip_json(result))
+        goal = parsed.get("goal")
+        if isinstance(goal, str) and goal.strip().lower() in ("null", "none", ""):
+            goal = None
+        return {
+            "belief_updates": parsed.get("belief_updates") or {},
+            "goal": goal or None,
+        }
+    except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+        # On failure, fall back to a mechanical fold so the truth still lands.
+        return {"belief_updates": dict(revealed_truth or {}), "goal": None, "error": str(e)}
+
+
 async def ai_summarize_memory(
     prior_summary: str,
     episodics_text: str,
