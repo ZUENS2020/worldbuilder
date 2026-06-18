@@ -215,6 +215,61 @@ export default function SimulatorPanel() {
               </label>
             </>
           )}
+
+          <span style={{ width: 1, height: 18, background: 'var(--mt-border)' }} />
+
+          {/* Drama controls — switchable mechanisms + master intensity dial */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5 }} title="戏剧强度总档位：越高，冲突越大胆、转折越剧烈（0~1）">
+            🎭 戏剧
+            <input type="range" min={0} max={1} step={0.05} defaultValue={cfg.drama_intensity ?? 0.3}
+              disabled={isPlaying}
+              onChange={(e) => patchConfig({ config: { drama_intensity: Number(e.target.value) } })}
+              style={{ width: 90 }} />
+            <span style={{ width: 24, textAlign: 'right' }}>{Number(cfg.drama_intensity ?? 0.3).toFixed(2)}</span>
+          </label>
+
+          {([
+            ['drama_actor', '演员', '让人物主动做出决定性行动/冲突，而非寒暄'],
+            ['drama_oracle', '裁决', '放开关系变化幅度，允许决裂/翻脸/剧变一步到位'],
+            ['drama_scheduler', '调度', '主动撮合敌对/陌生角色，制造对抗'],
+            ['drama_event_injector', '事件', '周期性注入外部突发事件（危机/介入/抉择）'],
+            ['drama_tension', '张力', '积压张力到临界则强制爆发'],
+            ['drama_director', '导演', '全局导演周期性升级一条冲突弧线'],
+          ] as [string, string, string][]).map(([key, label, tip]) => (
+            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 3 }} title={tip}>
+              <input type="checkbox" checked={!!cfg[key]} disabled={isPlaying}
+                onChange={(e) => patchConfig({ config: { [key]: e.target.checked } })} />
+              {label}
+            </label>
+          ))}
+
+          {cfg.drama_event_injector && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 5 }} title="每隔几个 tick 注入一次外部事件">
+              事件频率
+              <input type="number" min={1} defaultValue={cfg.drama_event_every_n ?? 3}
+                disabled={isPlaying}
+                onBlur={(e) => patchConfig({ config: { drama_event_every_n: Number(e.target.value) } })}
+                style={{ ...selStyle, width: 48 }} />
+            </label>
+          )}
+          {cfg.drama_tension && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 5 }} title="张力累积到该阈值即强制爆发">
+              张力阈值
+              <input type="number" min={0.1} step={0.1} defaultValue={cfg.drama_tension_threshold ?? 1.0}
+                disabled={isPlaying}
+                onBlur={(e) => patchConfig({ config: { drama_tension_threshold: Number(e.target.value) } })}
+                style={{ ...selStyle, width: 48 }} />
+            </label>
+          )}
+          {cfg.drama_director && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 5 }} title="每隔几个 tick 刷新一次导演调度">
+              导演频率
+              <input type="number" min={1} defaultValue={cfg.drama_director_every_n ?? 4}
+                disabled={isPlaying}
+                onBlur={(e) => patchConfig({ config: { drama_director_every_n: Number(e.target.value) } })}
+                style={{ ...selStyle, width: 48 }} />
+            </label>
+          )}
         </div>
       )}
 

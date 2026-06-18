@@ -215,12 +215,16 @@ async def ai_act(
     memory_blocks: dict[str, str],
     *,
     nudges: dict[str, str] | None = None,
+    drama: float = 0.0,
     config: dict | None = None,
     temperature: float = 0.8,
 ) -> dict:
     """Actor pass: roleplay one encounter between `participants` and produce a
     short narrative + each actor's intents. In P1 this is full-knowledge
     (scene_context is the omniscient view); belief-filtered views arrive in P4.
+
+    `drama` (0~1) tilts the actor away from polite small-talk toward decisive
+    action, confrontation, and turning points; it also relaxes the length cap.
 
     Returns {"narrative": str, "intents": [{"actor": name, "summary": str}]}.
     """
@@ -235,6 +239,18 @@ async def ai_act(
         if imp:
             nudge_text += f"\n（{name} 心中忽然升起一个模糊的预感：{imp}）\n"
 
+    if drama > 0:
+        limit = int(120 + drama * 130)  # up to ~250 字 at full intensity
+        drama_rule = (
+            f"\n\n【戏剧强度 {drama:.1f}／1.0】不要只是寒暄客套。让人物**主动做出决定性的行动或选择**，"
+            "推动局面发生**实质变化**——可以是表白、决裂、背叛、对峙、立誓、揭穿、求助、牺牲、越界等。"
+            "若场景或记忆里已埋着矛盾、秘密或夙愿，就让它在这次相遇里**升温甚至引爆**，而不是搁置。"
+            "强度越高，转折越大胆、情绪越浓烈、赌注越高。但仍要符合人物性格与既有处境，不可凭空胡来。"
+        )
+    else:
+        limit = 120
+        drama_rule = ""
+
     prompt = f"""你是一个关系演化模拟器的「演员」。下面是一次相遇场景的世界背景与参与者记忆，请生成这次互动。
 
 【世界背景】
@@ -243,17 +259,18 @@ async def ai_act(
 【参与者】{("、".join(participants))}
 {mem_text or ''}{nudge_text or ''}
 
-请演绎本次相遇：参与者之间发生了什么互动（对话/行动/情绪变化）。然后给出每个参与者在这次互动中的「意图」——他想改变的关系或自身状态（例如想拉近/疏远与某人的关系、产生新的目标或情绪）。
+请演绎本次相遇：参与者之间发生了什么互动（对话/行动/情绪变化）。然后给出每个参与者在这次互动中的「意图」——他想改变的关系或自身状态（例如想拉近/疏远与某人的关系、产生新的目标或情绪）。{drama_rule}
 
 只返回 JSON：
 {{
-  "narrative": "一段简洁的第三人称叙事，120字以内",
+  "narrative": "一段简洁的第三人称叙事，{limit}字以内",
   "intents": [
     {{"actor": "参与者名", "summary": "他这次互动想达成/改变什么（一句话）"}}
   ]
 }}"""
+    sys_extra = "在合理范围内大胆制造冲突与转折。" if drama > 0 else ""
     messages = [
-        {"role": "system", "content": "你是关系演化模拟器的演员，擅长把人物动机演绎成具体互动。只返回JSON。"},
+        {"role": "system", "content": f"你是关系演化模拟器的演员，擅长把人物动机演绎成具体互动。{sys_extra}只返回JSON。"},
         {"role": "user", "content": prompt},
     ]
     try:
@@ -273,12 +290,19 @@ async def ai_adjudicate(
     *,
     allow_new_entities: bool = False,
     generate_events: bool = False,
+    drama: float = 0.0,
+    directive: str = "",
     config: dict | None = None,
     temperature: float = 0.4,
 ) -> dict:
     """Oracle pass: take ALL of this tick's narratives + intents at once and
     resolve them into ONE consistent set of canonical mutations (conflict
     strategy = oracle_merge). Mutations reference entities by name.
+
+    `drama` (0~1) widens the allowed magnitude of change (bigger weight swings,
+    relationship type flips, ruptures) and lowers the bar for crystallizing
+    events. `directive` is an authoritative stage instruction (external shock /
+    forced explosion / director note) the Oracle must honor this tick.
 
     Returns {"mutations": [...], "new_entities": [...], "events": [...]}.
     Events (when generate_events) are significant happenings the Oracle judges
@@ -320,20 +344,41 @@ async def ai_adjudicate(
         if generate_events else ''
     )
 
+    if drama > 0:
+        lo, hi = 0.1, round(0.15 + drama * 0.45, 2)  # up to ±0.6 at full intensity
+        weight_rule = (
+            f"关系强度 weight 取值 0~1。weight_delta 是增量（可正可负）；本场戏剧强度 {drama:.1f}，"
+            f"对于真正发生转折的关系，幅度可以大胆些（建议 ±{lo}~{hi}），决裂/挚友翻脸/生死相托等剧变可一步到位。"
+        )
+        drama_extra = (
+            f"\n- 【戏剧化裁决·强度{drama:.1f}】不要把冲突抹平成温吞的小变化。当意图里出现对峙、背叛、表白、揭秘、"
+            "牺牲等戏剧性动作时，要让它在 canonical 世界里**真实落地**：该翻脸就改 type 为 enemy/rival，"
+            "该结盟/相爱就改为 ally/lover，该重创关系就大幅降 weight。允许一次相遇彻底改写一对关系。"
+            "宁可制造清晰的戏剧后果，也不要让世界停滞在原地。"
+        )
+    else:
+        weight_rule = "关系强度 weight 取值 0~1。weight_delta 是增量（可正可负，幅度建议 ±0.05~0.2）。"
+        drama_extra = ""
+
+    directive_block = (
+        f"\n\n【本 tick 的强制导演指令——必须在变更中体现】\n{directive.strip()}\n"
+        if directive and directive.strip() else ""
+    )
+
     prompt = f"""你是关系演化模拟器的「全知裁决者」(Oracle)。本 tick 发生了若干场相遇，请把它们整体解算成「一套」无矛盾的世界变更（canonical mutations）。
 
 【已有实体】{catalog_text}
 
 【本 tick 发生的场景与意图】
-{scenes_text}
+{scenes_text}{directive_block}
 
 裁决规则：
 - 把所有意图作为整体考虑，同一对关系的矛盾意图由你按合理性/当前关系强度/双方处境统一裁决，最终只产出一套不重复、不冲突的变更。
-- 关系强度 weight 取值 0~1。weight_delta 是增量（可正可负，幅度建议 ±0.05~0.2）。
+- {weight_rule}
 - 内部状态（mood 情绪 / goal 目标）写进 update_entity 的 properties。
 - {new_entity_rule}
 - 信息可见度落地：若某意图涉及「谁能知道某条信息」（揭示秘密给特定人、向某些人隐瞒某事），用 set_prop_visibility 把它落成确定名单——level 用 entities 时，entities 必须是**具体实体名**（你把「盟友」等群体展开成具体的人），private 表示仅自己可见，public 表示公开。
-- 没有实质变化的场景可以不产出 mutation。{event_rule}
+- 没有实质变化的场景可以不产出 mutation。{drama_extra}{event_rule}
 
 只返回 JSON：
 {{
@@ -518,6 +563,93 @@ async def ai_generate_nudge(
         text = text.strip('「」"\'` ').split("\n")[0].strip()
         return text[:60]
     except (httpx.HTTPError, KeyError) as e:
+        return ""
+
+
+async def ai_generate_drama_seed(
+    seed_type: str,
+    seed_desc: str,
+    cast: str,
+    world_blurb: str,
+    *,
+    intensity: float = 0.5,
+    config: dict | None = None,
+    temperature: float = 0.9,
+) -> dict:
+    """Drama event injector: invent a concrete EXTERNAL shock that lands on the
+    world this tick (crisis / third party / scarcity / deadline / revelation),
+    forcing the cast to react. Unlike a nudge (a private fuzzy hunch), this is a
+    public, concrete happening fed into every scene and crystallized as an event.
+
+    Returns {"headline": str, "detail": str, "participants": [names]}.
+    """
+    scale = "天翻地覆、关乎存亡" if intensity >= 0.75 else "无伤大雅的小插曲" if intensity <= 0.35 else "足以打乱日常的"
+    prompt = f"""你是关系演化模拟器的「事件导演」。请为这个世界投放一个**外部突发事件**，类型是「{seed_type}」——{seed_desc}。
+事件规模应当是{scale}的（戏剧强度 {intensity:.1f}／1.0）。
+
+【当前世界的主要关系（供你参考，让事件贴合现状）】
+{world_blurb or '（无）'}
+
+【建议卷入的角色】{cast}
+
+要求：
+- 这是一个**具体的、客观发生的**外部事件，不是某个角色的心理活动；它应当逼迫在场角色立刻做出反应、选边或抉择。
+- 要能搅动现有关系：制造共同的威胁、利益冲突、信任危机或抉择两难。
+- headline 是简短事件名（≤12字），detail 是一句话描述事件内容（≤50字），participants 是最受影响的角色名（从上面建议名单里选，2~4个）。
+
+只返回 JSON：
+{{"headline": "事件名", "detail": "一句话描述", "participants": ["角色1", "角色2"]}}"""
+    messages = [
+        {"role": "system", "content": "你是事件导演，向世界投放具体的外部突发事件以激发戏剧冲突。只返回JSON。"},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        result = await call_ai(messages, config=config, temperature=temperature, max_tokens=400)
+        parsed = json.loads(_strip_json(result))
+        return {
+            "headline": (parsed.get("headline") or "").strip(),
+            "detail": (parsed.get("detail") or "").strip(),
+            "participants": parsed.get("participants") or [],
+        }
+    except (json.JSONDecodeError, KeyError, httpx.HTTPError):
+        return {}
+
+
+async def ai_direct(
+    world_blurb: str,
+    tension_blurb: str,
+    recent_events: str,
+    *,
+    intensity: float = 0.5,
+    config: dict | None = None,
+    temperature: float = 0.8,
+) -> str:
+    """Director agent: a global stage-director reviews the whole world and issues
+    one short STAGE DIRECTION — which latent conflict to escalate next and how —
+    injected into subsequent scenes & the Oracle so arcs build toward climaxes
+    instead of meandering. Returns a short directive string (≤60 chars), or ""."""
+    push = "把矛盾推向高潮甚至摊牌" if intensity >= 0.6 else "缓缓加码、埋下伏笔"
+    prompt = f"""你是这个关系世界的「导演」。请俯瞰全局，挑出一条最值得**升级**的矛盾/弧线，给出一句简短的导演调度，让接下来的剧情朝戏剧高潮推进（当前戏剧强度 {intensity:.1f}，倾向于{push}）。
+
+【主要关系】{world_blurb or '（无）'}
+【积压张力】{tension_blurb or '（无）'}
+【近期事件】{recent_events or '（无）'}
+
+要求：
+- 指出该聚焦哪对/哪几个角色的什么冲突，以及希望它如何演进（升温、对峙、结盟、背叛、和解等其一）。
+- 这是给「演员」和「裁决者」的幕后调度，不是角色台词，也不要替角色做完整决定，只定方向与张力。
+- 一句话，60字以内。
+
+只返回这句导演调度正文，不要引号、不要解释、不要JSON。"""
+    messages = [
+        {"role": "system", "content": "你是关系世界的导演，俯瞰全局并给出推进戏剧冲突的幕后调度。只返回一句话。"},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        text = (await call_ai(messages, config=config, temperature=temperature, max_tokens=160)).strip()
+        text = text.strip('「」"\'` ').split("\n")[0].strip()
+        return text[:80]
+    except (httpx.HTTPError, KeyError):
         return ""
 
 

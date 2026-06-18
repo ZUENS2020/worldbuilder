@@ -23,6 +23,7 @@ from app.models.models import (
 from app.graph.engine import graph_engine
 from app.services import ai_service
 from app.services import belief
+from app.services import drama
 from app.services.memory import append_memory, get_memory_block, maybe_compact
 
 
@@ -51,6 +52,10 @@ DEFAULT_CONFIG = {
     "writeback_depth": "mechanical",     # mechanical | llm_oracle
     "st_source_label": "",
 }
+
+# Drama-enhancement controls (戏剧化) — switchable mechanisms + master intensity
+# dial. Defined in drama.py and merged here so they share one config surface.
+DEFAULT_CONFIG.update(drama.DEFAULTS)
 
 
 def _cfg(sim: Simulation, key: str):
@@ -104,6 +109,14 @@ def _pick_encounters(sim: Simulation) -> list[tuple[str, str]]:
             weights = [w for _, w in candidates]
             chosen = _weighted_sample(keys, weights, max_n)
             pairs = [tuple(k) for k in chosen]
+
+    # Drama scheduler: deliberately seed some charged encounters (enemies /
+    # strangers) ahead of the organic pairs so conflict actually gets staged.
+    if drama.on(sim, "drama_scheduler"):
+        lvl = drama.level(sim)
+        n_charged = max(1, round(lvl * max_n)) if lvl > 0 else 1
+        charged = drama.charged_pairs(pid, char_ids, rel_pairs, n_charged)
+        pairs = charged + pairs  # charged take priority before the cap
 
     # Dedup and cap.
     seen = set()
@@ -572,6 +585,7 @@ async def reset_simulation(db: AsyncSession, sim: Simulation) -> dict:
     """Restore canonical state to this sim's tick-0 baseline and wipe its derived
     state (beliefs, memories, ticks>0). Returns a small summary."""
     pid = sim.project_id
+    drama.clear_state(sim.id)  # drop transient director / explosion state
     base_row = (await db.execute(
         select(SimTick).where(SimTick.simulation_id == sim.id, SimTick.tick == 0)
     )).scalar_one_or_none()
@@ -675,6 +689,14 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
     nudges = await _emit_nudges(db, sim, tick, config)
     metrics["nudges"] = len(nudges)
 
+    # 0c. drama layer — global director directive, external shock injection, and
+    #     any tension explosions flagged on a previous tick (fire this tick).
+    drama_director_note = await drama.maybe_run_director(db, sim, tick, config)
+    drama_shock = await drama.maybe_inject_event(db, sim, tick, config)
+    drama_explosions = drama.consume_explosions(sim)
+    drama_actor_lvl = drama.actor_level(sim)
+    drama_oracle_lvl = drama.oracle_level(sim)
+
     # 1. scheduler
     encounters = _pick_encounters(sim)
     metrics["encounters"] = len(encounters)
@@ -699,9 +721,22 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
         scene_nudges = {
             name: nudges[name] for name in (a.name, b.name) if name in nudges
         }
+        # Prepend any drama context (shock / director note / impending explosion)
+        # so the actors play the scene against it.
+        scene_inject = ctx["system_injection"]
+        preamble = []
+        if drama_shock:
+            preamble.append(f"【突发事件】{drama_shock['headline']}：{drama_shock['detail']}")
+        if drama_director_note:
+            preamble.append(f"【局势】{drama_director_note}")
+        if frozenset((a.name, b.name)) in drama_explosions:
+            preamble.append("【临界】你们之间积压已久的张力即将到顶，这次相遇很可能爆发激烈的正面冲突或彻底决裂。")
+        if preamble:
+            scene_inject = "\n".join(preamble) + "\n\n" + scene_inject
         act = await ai_service.ai_act(
-            ctx["system_injection"], [a.name, b.name], mem_blocks,
-            nudges=scene_nudges or None, config=config, temperature=temperature,
+            scene_inject, [a.name, b.name], mem_blocks,
+            nudges=scene_nudges or None, drama=drama_actor_lvl,
+            config=config, temperature=temperature,
         )
         metrics["llm_calls"] += 1
         if act.get("narrative"):
@@ -711,6 +746,26 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
                 "narrative": act["narrative"],
                 "intents": act.get("intents", []),
             })
+
+    # Build the Oracle's authoritative directive from the drama layer (shock,
+    # director note, and any explosions that actually surfaced in a scene).
+    directive_parts = []
+    if drama_shock:
+        directive_parts.append(
+            f"外部突发事件「{drama_shock['headline']}」：{drama_shock['detail']}"
+            f"（卷入：{'、'.join(drama_shock['participants'])}）。让本 tick 的变更反映各方对此事的反应。"
+        )
+    if drama_director_note:
+        directive_parts.append(f"导演调度：{drama_director_note}")
+    if drama_explosions:
+        scene_pairs = {frozenset(s["participants"]) for s in scenes}
+        for p in drama_explosions:
+            if p in scene_pairs:
+                a_n, b_n = tuple(p)
+                directive_parts.append(
+                    f"{a_n} 与 {b_n} 之间积压的张力已达临界，必须给出实质性的爆发/决裂/转折（大幅改变其关系）。"
+                )
+    oracle_directive = "\n".join(directive_parts)
 
     # 3. Oracle adjudication (whole tick at once = oracle_merge conflict strategy)
     applied_mutations = []
@@ -722,7 +777,8 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
         ]
         verdict = await ai_service.ai_adjudicate(
             scenes, catalog, allow_new_entities=allow_new,
-            generate_events=gen_events, config=config,
+            generate_events=gen_events, drama=drama_oracle_lvl,
+            directive=oracle_directive, config=config,
         )
         metrics["llm_calls"] += 1
         # 4. apply mutations (dual-write)
@@ -737,6 +793,35 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
             )
             applied_mutations.extend(event_ops)
             metrics["events"] = sum(1 for o in event_ops if o.get("op") == "create_event")
+
+    # 4c. crystallize the injected external shock into its own event node, so the
+    #     dramatic beat is always visible even if no scene picked it up.
+    if drama_shock and drama_shock.get("headline"):
+        shock_ev = [{
+            "name": drama_shock["headline"],
+            "summary": drama_shock["detail"],
+            "participants": drama_shock["participants"],
+            "significance": max(0.6, drama.level(sim)),
+        }]
+        shock_ops = await _apply_events(db, sim, shock_ev, tick, 0.0)
+        applied_mutations.extend(shock_ops)
+        metrics["events"] = metrics.get("events", 0) + sum(
+            1 for o in shock_ops if o.get("op") == "create_event"
+        )
+
+    # 4d. tension accumulation/release on the scheduled pairs; over-threshold
+    #     pairs are flagged to explode on a later tick.
+    tension_log = await drama.update_tension(db, sim, scenes, applied_mutations)
+    if tension_log:
+        applied_mutations.extend(tension_log)
+
+    if drama.any_on(sim):
+        metrics["drama"] = {
+            "shock": drama_shock["headline"] if drama_shock else None,
+            "director": drama_director_note or None,
+            "explosions": [list(p) for p in drama_explosions],
+            "tension_explode": sum(1 for o in tension_log if o.get("op") == "tension_explode"),
+        }
     metrics["mutation_count"] = len(applied_mutations)
 
     # 3c. Oracle belief re-cognition — when a property was just opened to a
@@ -760,6 +845,21 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
                 db, sim, observer_id, subject.id, {key: truth_val}, config=config,
             )
             metrics["llm_calls"] += 1
+
+    # 4e. lodge the external shock as a salient memory for everyone it touched,
+    #     so they carry it forward even outside this tick's scenes.
+    if drama_shock and drama_shock.get("headline"):
+        shock_idx = _name_index(sim.project_id)
+        for pname in drama_shock["participants"]:
+            pe = shock_idx.get(pname)
+            if not pe:
+                continue
+            await append_memory(
+                db, project_id=sim.project_id, simulation_id=sim.id, entity_id=pe.id,
+                tick=tick, content=f"（突发事件）{drama_shock['headline']}：{drama_shock['detail']}",
+                participants=[n for n in drama_shock["participants"] if n != pname],
+                salience=0.8,
+            )
 
     # 5. episodic memory append + 6. compaction
     for s in scenes:
