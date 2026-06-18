@@ -284,6 +284,7 @@ async def ai_adjudicate(
     directive: str = "",
     pending_events: list[dict] | None = None,
     character_goals: list[dict] | None = None,
+    recent_events: list[dict] | None = None,
     config: dict | None = None,
     temperature: float = 0.4,
 ) -> dict:
@@ -371,6 +372,17 @@ async def ai_adjudicate(
         )
         goals_block = f"\n\n【各角色当前目标】\n{goal_lines}"
 
+    recent_block = ""
+    if recent_events:
+        recent_lines = "\n".join(
+            f"  · [{e.get('status', '?')}] {e.get('name')} — "
+            f"{(e.get('summary') or e.get('stakes') or e.get('description') or '')[:80]}"
+            for e in recent_events[:25]
+        )
+        recent_block = (
+            "\n\n【近期已发生/悬决中的事件（勿重复结晶或登记同题之变体）】\n" + recent_lines
+        )
+
     weight_rule = (
         "关系强度 weight 取值 0~1。weight_delta 是增量（可正可负）。"
         "变更幅度由当前关系强度、双方处境与意图的因果分量决定："
@@ -387,7 +399,7 @@ async def ai_adjudicate(
 本 tick 若干场遭遇，请解算成一套无矛盾的世界变更（canonical mutations）。
 
 【已有实体】{catalog_text}
-{goals_block}
+{goals_block}{recent_block}
 
 【本 tick 发生的场景与意图】
 {scenes_text}{pending_block}{directive_block}
@@ -430,6 +442,83 @@ async def ai_adjudicate(
         }
     except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
         return {"mutations": [], "new_entities": [], "events": [], "ripe_events": [], "error": str(e)}
+
+
+def _norm_event_name(name: str) -> str:
+    import unicodedata
+    return unicodedata.normalize("NFKC", name or "").strip().lower()
+
+
+async def ai_filter_event_duplicates(
+    candidates: list[dict],
+    existing: list[dict],
+    *,
+    config: dict | None = None,
+    temperature: float = 0.1,
+) -> list[dict]:
+    """LLM semantic dedupe: drop candidates that rephrase an existing event/pending.
+
+    Each candidate: {name, summary?|stakes?|description?, kind?: crystallize|pending}
+    Each existing:   {name, status, summary?|stakes?|description?, tick?}
+  On LLM failure, falls back to exact normalized name matching against existing."""
+    if not candidates:
+        return []
+    if not existing:
+        return list(candidates)
+
+    cand_lines: list[str] = []
+    for i, c in enumerate(candidates):
+        kind = c.get("kind") or "event"
+        name = (c.get("name") or "").strip()
+        detail = (c.get("summary") or c.get("stakes") or c.get("description") or "").strip()
+        cand_lines.append(f"  {i}. [{kind}] {name} — {detail[:120]}")
+
+    exist_lines: list[str] = []
+    for e in existing[:40]:
+        st = e.get("status") or "?"
+        name = (e.get("name") or "").strip()
+        detail = (e.get("summary") or e.get("stakes") or e.get("description") or "").strip()
+        tick = e.get("tick", "")
+        tick_s = f"t{tick}" if tick not in ("", None) else ""
+        exist_lines.append(f"  · [{st}] {name} {tick_s} — {detail[:120]}")
+
+    prompt = f"""你是事件去重裁判。判断「候选」是否只是在复述「已有事件」中**已发生（resolved）或已在悬决（pending）**的同一实质冲突，应剔除重复项。
+
+判定为重复（剔除）：
+- 仅换标题/措辞，同一对峙或博弈（如反复「逼问用药记录」「当众确认遗嘱真伪」「周伯逼陈律表态」）
+- 候选 pending 但已有 resolved/pending 覆盖同一赌注与当事人
+- 候选 crystallize 本 tick 动作，但主题与近期 resolved 完全相同且无新事实
+
+判定为不重复（保留）：
+- 明确新阶段、新信息、新后果（如「警方登岛」「人质被带走」「新证据来源被确认」）
+- 同一主线上的**下一阶段**（前一事件已结算且本候选推进到不同结果）
+
+【已有事件】
+{chr(10).join(exist_lines)}
+
+【候选（0-based 编号）】
+{chr(10).join(cand_lines)}
+
+只返回 JSON：{{"keep_indices": [0, 2, ...]}} — 应保留的候选编号。"""
+
+    messages = [
+        {"role": "system", "content": "你是事件语义去重裁判。只返回 JSON。"},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        result = await call_ai(messages, config=config, temperature=temperature, max_tokens=512)
+        parsed = json.loads(_strip_json(result))
+        indices = parsed.get("keep_indices")
+        if not isinstance(indices, list):
+            raise ValueError("missing keep_indices")
+        keep = {int(i) for i in indices if isinstance(i, (int, float)) and 0 <= int(i) < len(candidates)}
+        return [c for i, c in enumerate(candidates) if i in keep]
+    except (json.JSONDecodeError, KeyError, ValueError, httpx.HTTPError):
+        existing_names = {_norm_event_name(e.get("name", "")) for e in existing}
+        return [
+            c for c in candidates
+            if _norm_event_name(c.get("name", "")) not in existing_names
+        ]
 
 
 async def ai_resolve_visibility(

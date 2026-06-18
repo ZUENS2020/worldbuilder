@@ -100,10 +100,14 @@ interface AppState {
   loading: boolean;
   setLoading: (l: boolean) => void;
 
-  // Layout (Maltego UI) — switchable radial / force
+  // Layout (Maltego UI) — switchable radial / force (relations graph)
   layoutMode: 'radial' | 'force';
   setLayoutMode: (m: 'radial' | 'force') => void;
   layoutNonce: number;
+  // Event graph layout — hierarchical / force
+  eventLayoutMode: 'hierarchical' | 'force';
+  setEventLayoutMode: (m: 'hierarchical' | 'force') => void;
+  eventLayoutNonce: number;
   requestAutoLayout: () => void;
   tidyUp: () => void;
   layouting: boolean;
@@ -739,10 +743,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   layoutMode: 'radial',
   setLayoutMode: (m) => set({ layoutMode: m }),
   layoutNonce: 0,
+  eventLayoutMode: 'hierarchical',
+  setEventLayoutMode: (m) => set({ eventLayoutMode: m }),
+  eventLayoutNonce: 0,
   requestAutoLayout: () => set((s) => ({ layoutNonce: s.layoutNonce + 1 })),
-  tidyUp: () => set((s) => ({
-    layoutNonce: s.layoutNonce + 1,
-  })),
+  tidyUp: () => set((s) => {
+    if (s.viewMode === 'events') {
+      return { eventLayoutNonce: s.eventLayoutNonce + 1 };
+    }
+    if (s.viewMode === 'relations') {
+      return { layoutNonce: s.layoutNonce + 1 };
+    }
+    return {};
+  }),
   layouting: false,
   setLayouting: (b) => set({ layouting: b }),
   createOpen: false,

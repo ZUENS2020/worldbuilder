@@ -20,6 +20,7 @@ from app.services.simulation import (  # noqa: E402
     _mechanical_resolve_fallback,
     _scan_goal_conflicts,
     _event_sim_meta,
+    _event_dedupe_corpus,
     _norm_name,
     _register_pending_events,
 )
@@ -167,6 +168,28 @@ def test_promote_dormant_event_in_place():
     _reset_graph_for(pid)
 
 
+def test_event_dedupe_corpus_orders_by_tick():
+    pid = "dedupe-corpus-test"
+    _reset_graph_for(pid)
+    old = Entity(
+        id="ev-old", name="旧案", type="event", project_id=pid,
+        properties={"status": "resolved", "description": "a",
+                    "_sim": {"sim_id": "s1", "tick": 2, "resolved_tick": 2}},
+    )
+    new = Entity(
+        id="ev-new", name="新悬", type="event", project_id=pid,
+        properties={"status": "pending", "stakes": "b",
+                    "_sim": {"sim_id": "s1", "registered_tick": 9}},
+    )
+    for e in (old, new):
+        graph_engine.add_entity(e)
+    corpus = _event_dedupe_corpus(pid, "s1", limit=10)
+    assert len(corpus) == 2
+    assert corpus[0]["name"] == "新悬"
+    assert corpus[1]["name"] == "旧案"
+    _reset_graph_for(pid)
+
+
 def main() -> int:
     test_ripe_by_oracle_signal()
     test_oracle_ripe_blocked_before_due()
@@ -179,6 +202,7 @@ def main() -> int:
     test_preset_event_has_no_owner()
     test_norm_name_folds_width()
     test_promote_dormant_event_in_place()
+    test_event_dedupe_corpus_orders_by_tick()
     print("OK deduction_regression_test")
     return 0
 

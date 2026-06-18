@@ -94,11 +94,14 @@ export default function EventGraph() {
   const {
     entities, relations, addRelation, setSelectedEntity,
     project, customRelationTypes, setInspectorTab, clearTransformHighlight,
+    eventLayoutMode, eventLayoutNonce, setLayouting, layouting,
   } = useAppStore();
   const rf = useReactFlow();
 
   // ── Persistent position storage (localStorage per project) ──
   const POS_KEY = project ? `wb.event-positions.${project.id}` : '';
+  const LAYOUT_MODE_KEY = project ? `wb.event-layout-mode.${project.id}` : '';
+
   const loadPositions = (): Map<string, { x: number; y: number }> => {
     if (!POS_KEY) return new Map();
     try {
@@ -126,6 +129,61 @@ export default function EventGraph() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
+  const runEventLayout = useCallback(async (
+    mode: 'hierarchical' | 'force',
+    { clearCache = false }: { clearCache?: boolean } = {},
+  ) => {
+    if (clearCache) {
+      nodePositions.current = new Map();
+      if (POS_KEY) localStorage.removeItem(POS_KEY);
+    }
+    const { nodes: freshNodes, edges: freshEdges } = buildEventData(
+      entities, relations,
+      clearCache ? undefined : nodePositions.current,
+      customRelationTypes,
+    );
+    if (freshNodes.length === 0) return;
+
+    setLayouting(true);
+    try {
+      const laidOut = await calculateLayout(freshNodes, freshEdges, mode);
+      setNodes(laidOut);
+      setEdges(freshEdges);
+      laidOut.forEach((n) => nodePositions.current.set(n.id, n.position));
+      savePositions(nodePositions.current);
+      window.requestAnimationFrame(() => rf.fitView({ padding: 0.2, duration: clearCache ? 500 : 300 }));
+      setLayoutApplied(true);
+    } catch (e) {
+      console.error('Event layout failed:', e);
+    } finally {
+      setLayouting(false);
+    }
+  }, [POS_KEY, entities, relations, customRelationTypes, setNodes, setEdges, rf, setLayouting]);
+
+  // Toolbar「整理」/ 布局模式 — 由全局 eventLayoutNonce 触发
+  const handledEventNonce = useRef(eventLayoutNonce);
+  useEffect(() => {
+    if (eventLayoutNonce === handledEventNonce.current) return;
+    handledEventNonce.current = eventLayoutNonce;
+    void runEventLayout(eventLayoutMode, { clearCache: true });
+  }, [eventLayoutNonce, eventLayoutMode, runEventLayout]);
+
+  // Reload per-project layout prefs when switching projects.
+  useEffect(() => {
+    if (!project?.id || !LAYOUT_MODE_KEY) return;
+    nodePositions.current = loadPositions();
+    setLayoutApplied(false);
+    const v = localStorage.getItem(LAYOUT_MODE_KEY);
+    if (v === 'force' || v === 'hierarchical') {
+      useAppStore.getState().setEventLayoutMode(v);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id]);
+
+  useEffect(() => {
+    if (LAYOUT_MODE_KEY) localStorage.setItem(LAYOUT_MODE_KEY, eventLayoutMode);
+  }, [eventLayoutMode, LAYOUT_MODE_KEY]);
+
   // Sync when entities/relations change
   const prevRef = useRef({ entities, relations });
   if (entities !== prevRef.current.entities || relations !== prevRef.current.relations) {
@@ -144,7 +202,7 @@ export default function EventGraph() {
   // Auto-apply layout on first load or data change — but reuse saved
   // positions if we have them for most nodes (so reloads keep your layout).
   useEffect(() => {
-    if (layoutApplied || nodes.length === 0) return;
+    if (layoutApplied || nodes.length === 0 || layouting) return;
 
     const cached = nodePositions.current;
     const coverage = nodes.filter((n) => cached.has(n.id)).length / nodes.length;
@@ -160,19 +218,8 @@ export default function EventGraph() {
       return;
     }
 
-    (async () => {
-      try {
-        const laidOut = await calculateLayout(nodes, edges, 'hierarchical');
-        setNodes(laidOut);
-        laidOut.forEach((n) => nodePositions.current.set(n.id, n.position));
-        savePositions(nodePositions.current);
-        window.requestAnimationFrame(() => rf.fitView({ padding: 0.2, duration: 300 }));
-        setLayoutApplied(true);
-      } catch (e) {
-        console.error('Event layout failed:', e);
-      }
-    })();
-  }, [layoutApplied, nodes, edges, setNodes, rf]);
+    void runEventLayout(eventLayoutMode);
+  }, [layoutApplied, nodes.length, layouting, eventLayoutMode, runEventLayout, rf, setNodes]);
 
   const onNodeDragStop = useCallback((_: any, node: Node) => {
     nodePositions.current.set(node.id, node.position);
@@ -237,7 +284,7 @@ export default function EventGraph() {
             borderRadius: 4, padding: '4px 10px', fontSize: 11,
             color: 'var(--mt-text-muted)', boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
           }}>
-            ⚡ 事件因果脉络 · 拖拽连线创建因果链 · 右键展开参与者
+            ⚡ 事件因果脉络 · 拖拽连线创建因果链 · 右键展开参与者 · 顶部工具栏可整理布局
           </div>
         </Panel>
       </ReactFlow>

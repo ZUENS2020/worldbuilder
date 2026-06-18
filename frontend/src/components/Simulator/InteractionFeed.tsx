@@ -57,6 +57,7 @@ function TickCard({ t, highlight }: { t: SimTick; highlight?: boolean }) {
           {m.resolved_events ? ` · 结算 ${m.resolved_events}` : ''}
           {m.pending_registered ? ` · 新悬决 ${m.pending_registered}` : ''}
           {m.pending_registered_from_drought ? ` · 补种 ${m.pending_registered_from_drought}` : ''}
+          {m.dedupe_llm_skipped ? ` · 去重 ${m.dedupe_llm_skipped}` : ''}
           {m.pending_drought ? ' · 悬决空窗' : ''}
           {m.oracle_fallback ? ` · 裁决补全(${m.oracle_fallback})` : ''}
           {m.latency_ms != null ? ` · ${(m.latency_ms / 1000).toFixed(1)}s` : ''}

@@ -38,7 +38,7 @@ DEFAULT_CONFIG = {
     "memory_compact_threshold": 12,
     "generate_events": True,          # Oracle crystallizes significant happenings into event nodes
     "event_min_significance": 0.5,    # only events at/above this significance become nodes
-    "event_dedupe": True,
+    "event_dedupe": True,             # LLM semantic dedupe against recent events/pending
     # 推演 (causal forward-deduction of pending events)
     "pending_max_age": 8,             # force-resolve a pending event this many ticks after registration (0 = off)
     # P5 background loop / stop conditions
@@ -521,8 +521,7 @@ def _latest_sim_event(pid: str, sim_id: str, before_tick: int) -> Entity | None:
 
 
 def _is_duplicate_sim_event(pid: str, sim_id: str, name: str) -> bool:
-    """True if this sim already crystallized an event with the same name
-    (NFKC-normalized, so punctuation-width drift doesn't slip a duplicate past)."""
+    """Exact-name guard (LLM semantic dedupe runs earlier; this catches same-tick dupes)."""
     target = _norm_name(name)
     for eid in graph_engine.project_entities.get(pid, set()):
         e = graph_engine.entities.get(eid)
@@ -532,6 +531,64 @@ def _is_duplicate_sim_event(pid: str, sim_id: str, name: str) -> bool:
         if isinstance(meta, dict) and meta.get("sim_id") == sim_id:
             return True
     return False
+
+
+def _event_dedupe_corpus(pid: str, sim_id: str, *, limit: int = 35) -> list[dict]:
+    """Recent resolved + active pending events for LLM dedupe context."""
+    scored: list[tuple[int, dict]] = []
+    for eid in graph_engine.project_entities.get(pid, set()):
+        e = graph_engine.entities.get(eid)
+        if not e or e.type != "event":
+            continue
+        props = e.properties or {}
+        status = props.get("status")
+        if status not in ("pending", "resolved"):
+            continue
+        meta = _event_sim_meta(e)
+        owner = meta.get("sim_id")
+        if owner and owner != sim_id:
+            continue
+        tick = (
+            props.get("resolved_tick")
+            or meta.get("registered_tick")
+            or meta.get("tick")
+            or 0
+        )
+        tick_i = int(tick) if isinstance(tick, (int, float)) else 0
+        detail = props.get("stakes") or props.get("description") or ""
+        scored.append((tick_i, {
+            "name": e.name,
+            "status": status,
+            "stakes": detail,
+            "summary": props.get("description") or "",
+            "description": detail,
+            "tick": tick_i,
+        }))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [row for _, row in scored[:limit]]
+
+
+async def _llm_dedupe_candidates(
+    db: AsyncSession,
+    sim: Simulation,
+    candidates: list[dict],
+    metrics: dict,
+) -> list[dict]:
+    """Filter event/pending candidates through one LLM semantic dedupe pass."""
+    if not candidates or not _cfg(sim, "event_dedupe"):
+        return candidates
+    corpus = _event_dedupe_corpus(sim.project_id, sim.id)
+    if not corpus:
+        return candidates
+    await _release_db_lock(db, sim)
+    filtered = await ai_service.ai_filter_event_duplicates(
+        candidates, corpus, config=sim.config or {},
+    )
+    skipped = len(candidates) - len(filtered)
+    if skipped:
+        metrics["dedupe_llm_skipped"] = metrics.get("dedupe_llm_skipped", 0) + skipped
+    metrics["llm_calls"] = metrics.get("llm_calls", 0) + 1
+    return filtered
 
 
 async def _apply_events(
@@ -810,11 +867,13 @@ async def _ensure_future_pending(
             "当前无悬决事件。请根据以下角色目标冲突，用 register_pending_event "
             f"登记至少 1 件尚未发生的未来之事：\n{goal_lines}"
         )
+        dedupe_corpus = _event_dedupe_corpus(sim.project_id, sim.id)
         await _release_db_lock(db, sim)
         verdict = await ai_service.ai_adjudicate(
             scenes, catalog, generate_events=False,
             pending_events=None,
             character_goals=_character_goals_catalog(sim.project_id),
+            recent_events=dedupe_corpus or None,
             directive=directive, config=config, temperature=0.3,
         )
         metrics["llm_calls"] = metrics.get("llm_calls", 0) + 1
@@ -823,12 +882,26 @@ async def _ensure_future_pending(
             if m.get("op") == "register_pending_event"
         ]
         if register_ops:
+            reg_cands = [
+                {"name": m.get("name"), "stakes": m.get("stakes", ""), "kind": "pending"}
+                for m in register_ops if (m.get("name") or "").strip()
+            ]
+            kept = await _llm_dedupe_candidates(db, sim, reg_cands, metrics)
+            keep_names = {_norm_name(c.get("name", "")) for c in kept}
+            register_ops = [
+                m for m in register_ops
+                if _norm_name(m.get("name", "")) in keep_names
+            ]
+        if register_ops:
             applied = await _register_pending_events(db, sim, register_ops[:2], tick)
             metrics["pending_registered_from_drought"] = len(applied)
             return applied
 
     # Mechanical fallback.
-    applied = await _register_pending_events(db, sim, candidates[:1], tick)
+    mech = await _llm_dedupe_candidates(
+        db, sim, [{**c, "kind": "pending"} for c in candidates[:1]], metrics,
+    )
+    applied = await _register_pending_events(db, sim, mech, tick)
     metrics["pending_registered_from_drought"] = len(applied)
     return applied
 
@@ -1384,6 +1457,7 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
         if e
     ]
     goals_catalog = _character_goals_catalog(sim.project_id)
+    dedupe_corpus = _event_dedupe_corpus(sim.project_id, sim.id)
     if scenes:
         await _release_db_lock(db, sim)
         verdict = await ai_service.ai_adjudicate(
@@ -1391,6 +1465,7 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
             generate_events=gen_events,
             pending_events=pending_list or None,
             character_goals=goals_catalog or None,
+            recent_events=dedupe_corpus or None,
             config=config,
         )
         metrics["llm_calls"] += 1
@@ -1403,6 +1478,7 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
                 generate_events=gen_events,
                 pending_events=pending_list or None,
                 character_goals=goals_catalog or None,
+                recent_events=dedupe_corpus or None,
                 directive=retry_directive, config=config, temperature=0.3,
             )
             metrics["llm_calls"] += 1
@@ -1437,6 +1513,7 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
                 generate_events=True,
                 pending_events=pending_list or None,
                 character_goals=goals_catalog or None,
+                recent_events=dedupe_corpus or None,
                 directive=drought_directive, config=config, temperature=0.35,
             )
             metrics["llm_calls"] += 1
@@ -1456,6 +1533,31 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
         register_ops = [m for m in raw_mutations if m.get("op") == "register_pending_event"]
         plain_mutations = [m for m in raw_mutations if m.get("op") != "register_pending_event"]
 
+        events_for_apply = list(verdict.get("events") or [])
+        if gen_events and events_for_apply:
+            event_cands = [
+                {"name": e.get("name"), "summary": e.get("summary", ""), "kind": "crystallize"}
+                for e in events_for_apply if (e.get("name") or "").strip()
+            ]
+            kept_events = await _llm_dedupe_candidates(db, sim, event_cands, metrics)
+            keep_event_names = {_norm_name(c.get("name", "")) for c in kept_events}
+            events_for_apply = [
+                e for e in events_for_apply
+                if _norm_name(e.get("name", "")) in keep_event_names
+            ]
+
+        if register_ops:
+            reg_cands = [
+                {"name": m.get("name"), "stakes": m.get("stakes", ""), "kind": "pending"}
+                for m in register_ops if (m.get("name") or "").strip()
+            ]
+            kept_regs = await _llm_dedupe_candidates(db, sim, reg_cands, metrics)
+            keep_reg_names = {_norm_name(c.get("name", "")) for c in kept_regs}
+            register_ops = [
+                m for m in register_ops
+                if _norm_name(m.get("name", "")) in keep_reg_names
+            ]
+
         # 4. apply mutations (dual-write)
         applied_mutations.extend(await _apply_mutations(
             db, sim, plain_mutations, verdict.get("new_entities", []),
@@ -1463,7 +1565,7 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
         # 4b. crystallize significant happenings into resolved event nodes
         if gen_events:
             event_ops = await _apply_events(
-                db, sim, verdict.get("events", []), tick, event_min_sig,
+                db, sim, events_for_apply, tick, event_min_sig,
             )
             applied_mutations.extend(event_ops)
             metrics["events"] = sum(1 for o in event_ops if o.get("op") == "create_event")
@@ -1477,6 +1579,12 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
         # B3: intent fallback if Oracle missed future-oriented intents
         if not register_ops and not metrics.get("pending_registered"):
             intent_regs = _intents_suggest_pending(scenes)
+            if intent_regs:
+                intent_regs = await _llm_dedupe_candidates(
+                    db, sim,
+                    [{**r, "kind": "pending"} for r in intent_regs],
+                    metrics,
+                )
             if intent_regs:
                 intent_applied = await _register_pending_events(db, sim, intent_regs[:1], tick)
                 applied_mutations.extend(intent_applied)

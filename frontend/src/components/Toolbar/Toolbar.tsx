@@ -10,11 +10,41 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+const RELATION_LAYOUT_MODES = [
+  ['radial', '径向', '同心圆：以主角色为中心分环排列'],
+  ['force', '力导向', '力导向：相关节点自然成簇'],
+] as const;
+
+const EVENT_LAYOUT_MODES = [
+  ['hierarchical', '层级', '左→右层级：按因果链分层排列'],
+  ['force', '力导向', '力导向：相关事件自然成簇'],
+] as const;
+
 export default function Toolbar() {
   const rf = useReactFlow();
   const {
-    layouting, setCreateOpen, tidyUp, layoutMode, setLayoutMode,
+    viewMode,
+    layouting, setCreateOpen, tidyUp,
+    layoutMode, setLayoutMode,
+    eventLayoutMode, setEventLayoutMode,
   } = useAppStore();
+
+  const layoutActive = viewMode === 'relations' || viewMode === 'events';
+  const tidyTitle = viewMode === 'events'
+    ? '一键整理事件图：按当前布局模式重新排列因果链'
+    : viewMode === 'relations'
+      ? '一键整理关系图：按当前布局模式重新排列，消除重叠、减少连线交叉'
+      : '模拟器视图无可整理的画布';
+
+  const applyRelationLayoutMode = (mode: 'radial' | 'force') => {
+    setLayoutMode(mode);
+    if (viewMode === 'relations') tidyUp();
+  };
+
+  const applyEventLayoutMode = (mode: 'hierarchical' | 'force') => {
+    setEventLayoutMode(mode);
+    if (viewMode === 'events') tidyUp();
+  };
 
   return (
     <div
@@ -56,30 +86,52 @@ export default function Toolbar() {
         <button
           className="mt-btn"
           onClick={tidyUp}
-          disabled={layouting}
-          title="一键整理：按当前布局模式重新排列，消除重叠、减少连线交叉"
+          disabled={layouting || !layoutActive}
+          title={tidyTitle}
           style={{ fontWeight: 600, fontSize: 12, padding: '4px 12px' }}
         >
           {layouting ? <span className="mt-spin">⏳</span> : '✨'} 整理
         </button>
-        <div style={{ display: 'flex', border: '1px solid var(--mt-border)', borderRadius: 4, overflow: 'hidden', marginLeft: 4 }}>
-          {([['radial', '径向'], ['force', '力导向']] as const).map(([mode, label]) => (
-            <button
-              key={mode}
-              onClick={() => setLayoutMode(mode)}
-              disabled={layouting}
-              title={mode === 'radial' ? '同心圆：以主角色为中心分环排列' : '力导向：相关节点自然成簇'}
-              style={{
-                fontSize: 10, padding: '3px 8px', border: 'none', cursor: 'pointer',
-                background: layoutMode === mode ? 'var(--mt-accent)' : 'transparent',
-                color: layoutMode === mode ? '#fff' : 'var(--mt-text-muted)',
-                fontWeight: layoutMode === mode ? 600 : 400,
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {viewMode === 'relations' && (
+          <div style={{ display: 'flex', border: '1px solid var(--mt-border)', borderRadius: 4, overflow: 'hidden', marginLeft: 4 }}>
+            {RELATION_LAYOUT_MODES.map(([mode, label, tip]) => (
+              <button
+                key={mode}
+                onClick={() => applyRelationLayoutMode(mode)}
+                disabled={layouting}
+                title={tip}
+                style={{
+                  fontSize: 10, padding: '3px 8px', border: 'none', cursor: 'pointer',
+                  background: layoutMode === mode ? 'var(--mt-accent)' : 'transparent',
+                  color: layoutMode === mode ? '#fff' : 'var(--mt-text-muted)',
+                  fontWeight: layoutMode === mode ? 600 : 400,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {viewMode === 'events' && (
+          <div style={{ display: 'flex', border: '1px solid var(--mt-border)', borderRadius: 4, overflow: 'hidden', marginLeft: 4 }}>
+            {EVENT_LAYOUT_MODES.map(([mode, label, tip]) => (
+              <button
+                key={mode}
+                onClick={() => applyEventLayoutMode(mode)}
+                disabled={layouting}
+                title={tip}
+                style={{
+                  fontSize: 10, padding: '3px 8px', border: 'none', cursor: 'pointer',
+                  background: eventLayoutMode === mode ? 'var(--mt-accent)' : 'transparent',
+                  color: eventLayoutMode === mode ? '#fff' : 'var(--mt-text-muted)',
+                  fontWeight: eventLayoutMode === mode ? 600 : 400,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </Group>
       <div className="mt-sep" />
 
