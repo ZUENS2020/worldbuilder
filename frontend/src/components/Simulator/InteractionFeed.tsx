@@ -19,6 +19,8 @@ function mutationLabel(m: any): string {
     }
     case 'create_entity':
       return `新实体 ${m.name}（${m.type}）`;
+    case 'create_event':
+      return `⚡ 事件「${m.name}」${m.summary ? `：${m.summary}` : ''}`;
     case undefined:
       return JSON.stringify(m);
     default:
@@ -60,8 +62,10 @@ function TickCard({ t }: { t: SimTick }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
           {mutations.map((mu: any, i: number) => (
             <span key={i} style={{
-              fontSize: 10, color: mu.error ? '#c0392b' : 'var(--mt-text-muted)',
-              background: 'var(--mt-window)', border: '1px solid var(--mt-border)',
+              fontSize: 10,
+              color: mu.error ? '#c0392b' : mu.op === 'create_event' ? '#b3690f' : 'var(--mt-text-muted)',
+              background: mu.op === 'create_event' ? '#fdf2e2' : 'var(--mt-window)',
+              border: `1px solid ${mu.op === 'create_event' ? '#e8b877' : 'var(--mt-border)'}`,
               borderRadius: 3, padding: '1px 6px',
             }}>
               {mutationLabel(mu)}
