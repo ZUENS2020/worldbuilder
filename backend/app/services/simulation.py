@@ -14,10 +14,12 @@ import random
 import time
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Entity, Relation, Simulation, SimTick, WorldEntry
+from app.models.models import (
+    Entity, Relation, Simulation, SimTick, WorldEntry, Belief, AgentMemory,
+)
 from app.graph.engine import graph_engine
 from app.services import ai_service
 from app.services import belief
@@ -34,6 +36,16 @@ DEFAULT_CONFIG = {
     "memory_compact_threshold": 12,
     "generate_events": True,          # Oracle crystallizes significant happenings into event nodes
     "event_min_significance": 0.5,    # only events at/above this significance become nodes
+    # P5 background loop / stop conditions
+    "tick_interval_sec": 6,           # seconds between ticks when running in the background
+    "max_ticks": 0,                   # 0 = unlimited; otherwise auto-pause at this tick
+    "stability_window": 0,            # 0 = off; auto-pause after N consecutive zero-mutation ticks
+    # P5 heuristic perturbation (nudge / muse) — decision 12
+    "nudge_strategy": "off",          # off | random | targeted | weighted
+    "nudge_every_n_ticks": 1,         # emit nudges every N ticks
+    "nudge_targets_per_tick": 1,      # how many agents receive an impulse per nudge tick
+    "nudge_intensity": 0.5,           # 0~1 — how strong/insistent the impulse feels
+    "nudge_target_ids": [],           # explicit targets when strategy == targeted
     "writeback_trigger": "manual",       # manual | every_n_rounds | auto_llm
     "writeback_every_n": 3,
     "writeback_depth": "mechanical",     # mechanical | llm_oracle
@@ -124,6 +136,92 @@ def _weighted_sample(items, weights, k):
                 out.append(items.pop(i))
                 weights.pop(i)
                 break
+    return out
+
+
+# ── heuristic perturbation (nudge / muse) — decision 12 ──────────
+
+def _nudge_world_blurb(pid: str, target_id: str) -> str:
+    """A tiny omniscient blurb about the target's situation, fed to the Oracle
+    so its impulse feels grounded. The Oracle is told NOT to leak it verbatim."""
+    e = graph_engine.entities.get(target_id)
+    if not e:
+        return ""
+    bits = []
+    goal = (e.properties or {}).get("goal")
+    mood = (e.properties or {}).get("mood")
+    if goal:
+        bits.append(f"目标：{goal}")
+    if mood:
+        bits.append(f"情绪：{mood}")
+    rels = []
+    for r in graph_engine.adjacency.get(target_id, [])[:5]:
+        other_id = r.target_id if r.source_id == target_id else r.source_id
+        other = graph_engine.entities.get(other_id)
+        if other and other.type == "character":
+            rels.append(f"{other.name}({r.type} {r.weight:.1f})")
+    if rels:
+        bits.append("关系：" + "、".join(rels))
+    return "；".join(bits)
+
+
+def _pick_nudge_targets(sim: Simulation, tick: int) -> list[str]:
+    """Choose which agents get an impulse this tick, per nudge_strategy."""
+    strategy = _cfg(sim, "nudge_strategy")
+    if not strategy or strategy == "off":
+        return []
+    every_n = max(1, int(_cfg(sim, "nudge_every_n_ticks") or 1))
+    if tick % every_n != 0:
+        return []
+    n = max(1, int(_cfg(sim, "nudge_targets_per_tick") or 1))
+    pid = sim.project_id
+
+    if strategy == "targeted":
+        ids = [tid for tid in (_cfg(sim, "nudge_target_ids") or []) if tid in graph_engine.entities]
+        return ids[:n]
+
+    char_ids = [
+        eid for eid in graph_engine.project_entities.get(pid, set())
+        if (e := graph_engine.entities.get(eid)) and e.type == "character"
+    ]
+    if not char_ids:
+        return []
+
+    if strategy == "weighted":
+        # Favor well-connected agents (more relations = more likely to be nudged).
+        weights = [max(1, len(graph_engine.adjacency.get(cid, []))) for cid in char_ids]
+        return [str(x) for x in _weighted_sample(char_ids, weights, n)]
+    # random
+    random.shuffle(char_ids)
+    return char_ids[:n]
+
+
+async def _emit_nudges(db: AsyncSession, sim: Simulation, tick: int, config: dict) -> dict[str, str]:
+    """Step 0: deliver fuzzy intuition impulses to selected agents. Each impulse
+    lands as a low-salience 预感 memory AND is returned (keyed by entity NAME) so
+    the Actor pass can inject it into those agents' scene context this tick."""
+    targets = _pick_nudge_targets(sim, tick)
+    if not targets:
+        return {}
+    intensity = float(_cfg(sim, "nudge_intensity") or 0.5)
+    out: dict[str, str] = {}
+    for tid in targets:
+        e = graph_engine.entities.get(tid)
+        if not e:
+            continue
+        impulse = await ai_service.ai_generate_nudge(
+            e.name, _nudge_world_blurb(sim.project_id, tid),
+            intensity=intensity, config=config,
+        )
+        if not impulse:
+            continue
+        out[e.name] = impulse
+        await append_memory(
+            db, project_id=sim.project_id, simulation_id=sim.id, entity_id=tid,
+            tick=tick, content=f"（一阵{('强烈' if intensity >= 0.75 else '模糊')}的预感）{impulse}",
+            participants=[], salience=0.15,
+        )
+    await db.flush()
     return out
 
 
@@ -422,6 +520,130 @@ async def _build_snapshot(db: AsyncSession, sim: Simulation) -> dict:
     return {"relations": relations, "entities": entities, "beliefs": beliefs}
 
 
+# ── tick-0 baseline + reset (replay anchor) ──────────────────────
+
+async def capture_baseline(db: AsyncSession, sim: Simulation) -> SimTick:
+    """Write the tick-0 SimTick: a FULL snapshot of canonical state at sim start,
+    so `reset_simulation` can faithfully restore the world (decision 3 / reset)."""
+    pid = sim.project_id
+    entities = {}
+    for eid in graph_engine.project_entities.get(pid, set()):
+        e = graph_engine.entities.get(eid)
+        if e:
+            entities[e.id] = {"name": e.name, "type": e.type, "properties": dict(e.properties or {})}
+    relations = []
+    for r in graph_engine.get_project_relations(pid):
+        relations.append({
+            "id": r.id, "source_id": r.source_id, "target_id": r.target_id,
+            "type": r.type, "weight": r.weight, "properties": dict(r.properties or {}),
+        })
+    # Live snapshot (mutable view) plus the full baseline used only for restore.
+    snapshot = await _build_snapshot(db, sim)
+    snapshot["baseline"] = {"entities": entities, "relations": relations}
+
+    row = SimTick(
+        id=str(uuid.uuid4()), simulation_id=sim.id, project_id=pid, tick=0,
+        interactions=[], mutations=[], snapshot=snapshot,
+        metrics={"llm_calls": 0, "encounters": 0, "nudges": 0, "mutation_count": 0},
+    )
+    db.add(row)
+    await db.flush()
+    return row
+
+
+def _reset_project_graph(pid: str) -> None:
+    """Drop a project's entire in-memory mirror so it can be reloaded from DB."""
+    for eid in list(graph_engine.project_entities.get(pid, set())):
+        graph_engine.entities.pop(eid, None)
+        graph_engine.adjacency.pop(eid, None)
+    graph_engine.project_entities[pid] = set()
+    graph_engine.project_relations[pid] = set()
+
+
+async def _reload_project_graph(db: AsyncSession, pid: str) -> None:
+    _reset_project_graph(pid)
+    ents = (await db.execute(select(Entity).where(Entity.project_id == pid))).scalars().all()
+    graph_engine.load_entities(ents)
+    rels = (await db.execute(select(Relation).where(Relation.project_id == pid))).scalars().all()
+    graph_engine.load_relations(rels)
+
+
+async def reset_simulation(db: AsyncSession, sim: Simulation) -> dict:
+    """Restore canonical state to this sim's tick-0 baseline and wipe its derived
+    state (beliefs, memories, ticks>0). Returns a small summary."""
+    pid = sim.project_id
+    base_row = (await db.execute(
+        select(SimTick).where(SimTick.simulation_id == sim.id, SimTick.tick == 0)
+    )).scalar_one_or_none()
+    baseline = (base_row.snapshot or {}).get("baseline") if base_row else None
+
+    removed_entities = restored_entities = removed_relations = restored_relations = 0
+
+    if baseline:
+        base_ents: dict = baseline.get("entities", {})
+        base_rels: list = baseline.get("relations", [])
+        base_rel_by_id = {r["id"]: r for r in base_rels}
+
+        # Relations: delete sim-created ones, restore baseline ones.
+        cur_rels = (await db.execute(select(Relation).where(Relation.project_id == pid))).scalars().all()
+        cur_rel_ids = set()
+        for r in cur_rels:
+            cur_rel_ids.add(r.id)
+            if r.id not in base_rel_by_id:
+                await db.delete(r)
+                removed_relations += 1
+            else:
+                b = base_rel_by_id[r.id]
+                r.type, r.weight, r.properties = b["type"], b["weight"], dict(b.get("properties") or {})
+                restored_relations += 1
+        # Re-create baseline relations that were deleted during the sim.
+        for rid, b in base_rel_by_id.items():
+            if rid not in cur_rel_ids:
+                db.add(Relation(
+                    id=rid, source_id=b["source_id"], target_id=b["target_id"],
+                    type=b["type"], weight=b["weight"], properties=dict(b.get("properties") or {}),
+                    project_id=pid,
+                ))
+                restored_relations += 1
+
+        # Entities: delete sim-created ones, restore baseline props.
+        cur_ents = (await db.execute(select(Entity).where(Entity.project_id == pid))).scalars().all()
+        cur_ent_ids = set()
+        for e in cur_ents:
+            cur_ent_ids.add(e.id)
+            if e.id not in base_ents:
+                await db.delete(e)
+                removed_entities += 1
+            else:
+                b = base_ents[e.id]
+                e.name, e.type, e.properties = b["name"], b["type"], dict(b.get("properties") or {})
+                restored_entities += 1
+        for eid, b in base_ents.items():
+            if eid not in cur_ent_ids:
+                db.add(Entity(id=eid, name=b["name"], type=b["type"],
+                              properties=dict(b.get("properties") or {}), project_id=pid))
+                restored_entities += 1
+
+    # Wipe derived state: beliefs (project-scoped), this sim's memories, ticks > 0.
+    await db.execute(delete(Belief).where(Belief.project_id == pid))
+    await db.execute(delete(AgentMemory).where(AgentMemory.simulation_id == sim.id))
+    await db.execute(delete(SimTick).where(SimTick.simulation_id == sim.id, SimTick.tick > 0))
+
+    sim.current_tick = 0
+    sim.status = "idle"
+    await db.commit()
+
+    # Rebuild the in-memory mirror from the restored DB rows.
+    if baseline:
+        await _reload_project_graph(db, pid)
+
+    return {
+        "reset": True, "had_baseline": bool(baseline),
+        "removed_entities": removed_entities, "restored_entities": restored_entities,
+        "removed_relations": removed_relations, "restored_relations": restored_relations,
+    }
+
+
 # ── public API ───────────────────────────────────────────────────
 
 async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
@@ -449,6 +671,10 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
     # P4: ensure each character has a starting belief copy (idempotent).
     await belief.seed_beliefs(db, sim)
 
+    # 0. heuristic perturbation (nudge / muse) — fuzzy impulses to select agents
+    nudges = await _emit_nudges(db, sim, tick, config)
+    metrics["nudges"] = len(nudges)
+
     # 1. scheduler
     encounters = _pick_encounters(sim)
     metrics["encounters"] = len(encounters)
@@ -470,9 +696,12 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
             a.name: await get_memory_block(db, simulation_id=sim.id, entity_id=a_id, recent_k=recent_k),
             b.name: await get_memory_block(db, simulation_id=sim.id, entity_id=b_id, recent_k=recent_k),
         }
+        scene_nudges = {
+            name: nudges[name] for name in (a.name, b.name) if name in nudges
+        }
         act = await ai_service.ai_act(
             ctx["system_injection"], [a.name, b.name], mem_blocks,
-            config=config, temperature=temperature,
+            nudges=scene_nudges or None, config=config, temperature=temperature,
         )
         metrics["llm_calls"] += 1
         if act.get("narrative"):

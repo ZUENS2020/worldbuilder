@@ -74,6 +74,24 @@ export const api = {
     request<any>(`/projects/${projectId}/simulations/${simId}`),
   stepSimulation: (projectId: string, simId: string) =>
     request<any>(`/projects/${projectId}/simulations/${simId}/step`, { method: 'POST' }),
+
+  // P5: background loop control + replay/reset
+  playSimulation: (projectId: string, simId: string) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}/play`, { method: 'POST' }),
+  pauseSimulation: (projectId: string, simId: string) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}/pause`, { method: 'POST' }),
+  resetSimulation: (projectId: string, simId: string) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}/reset`, { method: 'POST' }),
+  // Raw SSE endpoint URL — consumed via EventSource in the store.
+  streamUrl: (projectId: string, simId: string) =>
+    `${API_BASE}/projects/${projectId}/simulations/${simId}/stream`,
+  getTick: (projectId: string, simId: string, tick: number) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}/ticks/${tick}`),
+  patchSimConfig: (projectId: string, simId: string, body: { driver_mode?: string; config?: Record<string, any> }) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}/config`, {
+      method: 'PATCH', body: JSON.stringify(body),
+    }),
+
   getTicks: (projectId: string, simId: string, from?: number, to?: number) => {
     const params = new URLSearchParams();
     if (from != null) params.set('from', String(from));

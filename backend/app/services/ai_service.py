@@ -474,6 +474,53 @@ async def ai_reconcile_belief(
         return {"belief_updates": dict(revealed_truth or {}), "goal": None, "error": str(e)}
 
 
+async def ai_generate_nudge(
+    target_name: str,
+    world_blurb: str,
+    *,
+    intensity: float = 0.5,
+    config: dict | None = None,
+    temperature: float = 0.9,
+) -> str:
+    """Oracle heuristic-perturbation pass (plan decision 12 / step 0).
+
+    The omniscient Oracle periodically delivers a fuzzy "intuition / hunch" to a
+    target agent — modelling real-world intuition, inspiration, coincidence, and
+    randomness so pure logical inference doesn't run the world dead. The Oracle
+    sees the whole world but MUST output only a vague impulse, never a directly
+    actionable truth — so it can't pollute the information asymmetry (it lands as
+    a low-salience "预感" memory the agent may act on).
+
+    Returns a short impulse string (≤40 chars), or "" on failure / if nothing fits.
+    """
+    strength = (
+        "强烈而清晰" if intensity >= 0.75 else
+        "若有若无、几乎抓不住" if intensity <= 0.35 else "模糊但挥之不去"
+    )
+    prompt = f"""你是关系演化模拟器的「天意 / 缪斯」(全知 Oracle)。请给角色「{target_name}」投递一个{strength}的**直觉 / 预感 / 冲动**，模拟现实里的灵感、巧合与随机性，让 TA 这一刻产生某种想做点什么的念头。
+
+【你所知的世界片段（仅供你参考，不要原样泄露给角色）】
+{world_blurb or '（无）'}
+
+铁则：
+- 只能是**模糊的情绪/冲动/预感**，绝不能包含任何具体、可直接坐实的真相或信息（不能告诉 TA 谁做了什么、某个秘密是什么）。
+- 不替角色做决定，只给一个朝向（想接近谁、想远离、想确认某事、隐隐的不安/期待等）。
+- 一句话，40字以内，第二人称或无主语，像心里忽然冒出的念头。
+
+只返回这句预感正文，不要引号、不要解释、不要JSON。"""
+    messages = [
+        {"role": "system", "content": "你是全知的天意/缪斯，只向角色投递模糊的直觉冲动，绝不泄露具体真相。只返回一句预感正文。"},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        text = (await call_ai(messages, config=config, temperature=temperature, max_tokens=128)).strip()
+        # Strip stray quotes/fences a model might add.
+        text = text.strip('「」"\'` ').split("\n")[0].strip()
+        return text[:60]
+    except (httpx.HTTPError, KeyError) as e:
+        return ""
+
+
 async def ai_summarize_memory(
     prior_summary: str,
     episodics_text: str,

@@ -28,12 +28,19 @@ function mutationLabel(m: any): string {
   }
 }
 
-function TickCard({ t }: { t: SimTick }) {
+function TickCard({ t, highlight }: { t: SimTick; highlight?: boolean }) {
   const interactions = Array.isArray(t.interactions) ? t.interactions : [];
   const mutations = Array.isArray(t.mutations) ? t.mutations : [];
   const m = t.metrics || {};
   return (
-    <div style={{ borderBottom: '1px solid var(--mt-border)', padding: '10px 12px' }}>
+    <div
+      data-tick={t.tick}
+      style={{
+        borderBottom: '1px solid var(--mt-border)', padding: '10px 12px',
+        background: highlight ? 'var(--mt-accent-bg)' : undefined,
+        transition: 'background 0.25s ease',
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span style={{
           fontSize: 11, fontWeight: 700, color: 'var(--mt-accent-dark)',
@@ -80,11 +87,20 @@ function TickCard({ t }: { t: SimTick }) {
 export default function InteractionFeed() {
   const ticks = useSimStore((s) => s.ticks);
   const stepping = useSimStore((s) => s.stepping);
+  const scrubTick = useSimStore((s) => s.scrubTick);
   const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Scrubbing pauses the live auto-scroll; jump to the inspected tick instead.
+    if (scrubTick != null) {
+      scrollRef.current
+        ?.querySelector(`[data-tick="${scrubTick}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [ticks.length, stepping]);
+  }, [ticks.length, stepping, scrubTick]);
 
   if (ticks.length === 0 && !stepping) {
     return (
@@ -95,8 +111,8 @@ export default function InteractionFeed() {
   }
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto' }}>
-      {ticks.map((t) => <TickCard key={t.id} t={t} />)}
+    <div ref={scrollRef} style={{ height: '100%', overflowY: 'auto' }}>
+      {ticks.map((t) => <TickCard key={t.id} t={t} highlight={scrubTick === t.tick} />)}
       {stepping && (
         <div style={{ padding: '12px', textAlign: 'center', color: 'var(--mt-text-muted)', fontSize: 12 }}>
           ⏳ 角色们正在互动，世界正在演化…

@@ -26,14 +26,22 @@ interface SimState {
   sim: Simulation | null;
   ticks: SimTick[];        // accumulated narrative feed (tick 1..n)
   stepping: boolean;
+  isPlaying: boolean;      // background loop active (P5)
+  scrubTick: number | null; // timeline scrub position; null = live/latest
   error: string | null;
   writebackItems: any[];
   writebackPreview: any | null;
 
   loadSims: () => Promise<void>;
   selectSim: (simId: string) => Promise<void>;
-  createSim: (driverMode?: string) => Promise<Simulation | null>;
+  createSim: (driverMode?: string, config?: Record<string, any>) => Promise<Simulation | null>;
   step: () => Promise<void>;
+  play: () => Promise<void>;
+  pause: () => Promise<void>;
+  resetSim: () => Promise<void>;
+  setScrubTick: (tick: number | null) => void;
+  patchConfig: (body: { driver_mode?: string; config?: Record<string, any> }) => Promise<void>;
+  _subscribe: () => void;
   reset: () => void;
   loadWritebackQueue: (status?: string) => Promise<void>;
   previewWriteback: (ids: string[], depth: string) => Promise<void>;
@@ -41,11 +49,23 @@ interface SimState {
   updateWritebackConfig: (patch: Record<string, unknown>) => Promise<void>;
 }
 
+// SSE connection is kept outside the store (not serializable).
+let _es: EventSource | null = null;
+
+function _closeStream() {
+  if (_es) {
+    _es.close();
+    _es = null;
+  }
+}
+
 export const useSimStore = create<SimState>((set, get) => ({
   sims: [],
   sim: null,
   ticks: [],
   stepping: false,
+  isPlaying: false,
+  scrubTick: null,
   error: null,
   writebackItems: [],
   writebackPreview: null,
@@ -69,22 +89,25 @@ export const useSimStore = create<SimState>((set, get) => ({
     const projectId = useAppStore.getState().project?.id;
     if (!projectId) return;
     try {
+      _closeStream();
       const [sim, ticks] = await Promise.all([
         api.getSimulation(projectId, simId),
         api.getTicks(projectId, simId),
       ]);
-      set({ sim, ticks });
+      // Skip the tick-0 baseline row in the narrative feed.
+      set({ sim, ticks: ticks.filter((t) => t.tick > 0), scrubTick: null, isPlaying: sim.status === 'running' });
+      if (sim.status === 'running') get()._subscribe();
     } catch (e: any) {
       set({ error: String(e?.message || e) });
     }
   },
 
-  createSim: async (driverMode = 'hybrid') => {
+  createSim: async (driverMode = 'hybrid', config) => {
     const projectId = useAppStore.getState().project?.id;
     if (!projectId) return null;
     try {
-      const sim = await api.createSimulation(projectId, { driver_mode: driverMode });
-      set((s) => ({ sims: [sim, ...s.sims], sim, ticks: [] }));
+      const sim = await api.createSimulation(projectId, { driver_mode: driverMode, config });
+      set((s) => ({ sims: [sim, ...s.sims], sim, ticks: [], scrubTick: null, isPlaying: false }));
       return sim;
     } catch (e: any) {
       set({ error: String(e?.message || e) });
@@ -113,7 +136,122 @@ export const useSimStore = create<SimState>((set, get) => ({
     }
   },
 
-  reset: () => set({ sim: null, ticks: [], error: null, writebackItems: [], writebackPreview: null }),
+  play: async () => {
+    const projectId = useAppStore.getState().project?.id;
+    const sim = get().sim;
+    if (!projectId || !sim) return;
+    set({ error: null });
+    try {
+      const res = await api.playSimulation(projectId, sim.id);
+      set((s) => ({
+        sim: res.simulation,
+        sims: s.sims.map((x) => (x.id === res.simulation.id ? res.simulation : x)),
+        isPlaying: true,
+        scrubTick: null,
+      }));
+      get()._subscribe();
+    } catch (e: any) {
+      set({ error: String(e?.message || e) });
+    }
+  },
+
+  pause: async () => {
+    const projectId = useAppStore.getState().project?.id;
+    const sim = get().sim;
+    if (!projectId || !sim) return;
+    try {
+      const res = await api.pauseSimulation(projectId, sim.id);
+      _closeStream();
+      set((s) => ({
+        sim: res.simulation,
+        sims: s.sims.map((x) => (x.id === res.simulation.id ? res.simulation : x)),
+        isPlaying: false,
+      }));
+      // Sync the canonical graph after the loop's accumulated mutations.
+      await useAppStore.getState().loadProjectData(projectId);
+    } catch (e: any) {
+      set({ error: String(e?.message || e) });
+    }
+  },
+
+  resetSim: async () => {
+    const projectId = useAppStore.getState().project?.id;
+    const sim = get().sim;
+    if (!projectId || !sim) return;
+    _closeStream();
+    set({ error: null });
+    try {
+      const res = await api.resetSimulation(projectId, sim.id);
+      set((s) => ({
+        sim: res.simulation,
+        sims: s.sims.map((x) => (x.id === res.simulation.id ? res.simulation : x)),
+        ticks: [],
+        scrubTick: null,
+        isPlaying: false,
+      }));
+      // The world was restored to its tick-0 baseline — refresh the canvas.
+      await useAppStore.getState().loadProjectData(projectId);
+    } catch (e: any) {
+      set({ error: String(e?.message || e) });
+    }
+  },
+
+  setScrubTick: (tick) => set({ scrubTick: tick }),
+
+  patchConfig: async (body) => {
+    const projectId = useAppStore.getState().project?.id;
+    const sim = get().sim;
+    if (!projectId || !sim) return;
+    try {
+      const updated = await api.patchSimConfig(projectId, sim.id, body);
+      set((s) => ({ sim: updated, sims: s.sims.map((x) => (x.id === updated.id ? updated : x)) }));
+    } catch (e: any) {
+      set({ error: String(e?.message || e) });
+    }
+  },
+
+  _subscribe: () => {
+    const projectId = useAppStore.getState().project?.id;
+    const sim = get().sim;
+    if (!projectId || !sim) return;
+    _closeStream();
+    const es = new EventSource(api.streamUrl(projectId, sim.id));
+    _es = es;
+    es.onmessage = (ev) => {
+      let msg: any;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type === 'tick' && msg.tick) {
+        set((s) => {
+          // De-dupe in case of reconnection overlap.
+          const exists = s.ticks.some((t) => t.tick === msg.tick.tick);
+          const ticks = exists ? s.ticks : [...s.ticks, msg.tick];
+          const sim = s.sim ? { ...s.sim, current_tick: msg.tick.tick } : s.sim;
+          return { ticks, sim, sims: s.sims.map((x) => (sim && x.id === sim.id ? sim : x)) };
+        });
+        // Keep the main graph in step with the evolving world.
+        useAppStore.getState().loadProjectData(projectId);
+      } else if (msg.type === 'paused') {
+        _closeStream();
+        set({ isPlaying: false });
+        const pid = useAppStore.getState().project?.id;
+        const sid = get().sim?.id;
+        if (pid && sid) api.getSimulation(pid, sid).then((sim) =>
+          set((s) => ({ sim, sims: s.sims.map((x) => (x.id === sim.id ? sim : x)) }))
+        ).catch(() => {});
+      } else if (msg.type === 'error') {
+        set({ error: msg.message || 'simulation loop error' });
+      }
+    };
+    es.onerror = () => {
+      // EventSource auto-reconnects; if the loop already paused server-side,
+      // the next select/poll will reconcile status.
+    };
+  },
+
+  reset: () => {
+    _closeStream();
+    set({ sim: null, ticks: [], scrubTick: null, isPlaying: false, error: null, writebackItems: [], writebackPreview: null });
+  },
 
   loadWritebackQueue: async (status = 'pending') => {
     const projectId = useAppStore.getState().project?.id;

@@ -1,15 +1,19 @@
 """Simulation API routes — P1: create/get + manual single-step + tick & memory reads."""
 
+import asyncio
+import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.models import Simulation, SimTick, AgentMemory, Project
-from app.services.simulation import run_tick, DEFAULT_CONFIG
+from app.services.simulation import run_tick, capture_baseline, reset_simulation, DEFAULT_CONFIG
+from app.services import sim_runner
 from app.services import belief
 from app.services.memory import get_memory_block
 from app.services import st_writeback
@@ -64,6 +68,9 @@ async def create_simulation(project_id: str, data: SimulationCreate, db: AsyncSe
         config=config,
     )
     db.add(sim)
+    await db.flush()
+    # Capture a full tick-0 baseline so the sim can be reset/replayed later.
+    await capture_baseline(db, sim)
     await db.commit()
     await db.refresh(sim)
     return sim
@@ -95,6 +102,87 @@ async def step_simulation(project_id: str, sim_id: str, db: AsyncSession = Depen
         raise HTTPException(404, "Simulation not found")
     simtick = await run_tick(db, sim)
     return {"simulation": SimulationOut.model_validate(sim).model_dump(), "tick": _serialize_tick(simtick)}
+
+
+# ── background loop control (P5) ─────────────────────────────────
+
+async def _load_sim(db: AsyncSession, project_id: str, sim_id: str) -> Simulation:
+    sim = await db.get(Simulation, sim_id)
+    if not sim or sim.project_id != project_id:
+        raise HTTPException(404, "Simulation not found")
+    return sim
+
+
+@router.post("/{sim_id}/play")
+async def play_simulation(project_id: str, sim_id: str, db: AsyncSession = Depends(get_db)):
+    sim = await _load_sim(db, project_id, sim_id)
+    await sim_runner.play(db, sim)
+    await db.refresh(sim)
+    return {"simulation": SimulationOut.model_validate(sim).model_dump(), "running": sim_runner.is_running(sim_id)}
+
+
+@router.post("/{sim_id}/pause")
+async def pause_simulation(project_id: str, sim_id: str, db: AsyncSession = Depends(get_db)):
+    sim = await _load_sim(db, project_id, sim_id)
+    await sim_runner.pause(db, sim)
+    await db.refresh(sim)
+    return {"simulation": SimulationOut.model_validate(sim).model_dump(), "running": sim_runner.is_running(sim_id)}
+
+
+@router.post("/{sim_id}/reset")
+async def reset_simulation_route(project_id: str, sim_id: str, db: AsyncSession = Depends(get_db)):
+    sim = await _load_sim(db, project_id, sim_id)
+    await sim_runner.stop_for_reset(sim_id)
+    result = await reset_simulation(db, sim)
+    await db.refresh(sim)
+    return {"simulation": SimulationOut.model_validate(sim).model_dump(), **result}
+
+
+class SimConfigPatch(BaseModel):
+    driver_mode: str | None = None
+    config: dict | None = None
+
+
+@router.patch("/{sim_id}/config")
+async def patch_sim_config(project_id: str, sim_id: str, data: SimConfigPatch, db: AsyncSession = Depends(get_db)):
+    """Tune a sim's driver / runtime config (interval, stop conditions, nudge).
+    Only keys already present in DEFAULT_CONFIG are accepted."""
+    sim = await _load_sim(db, project_id, sim_id)
+    if data.driver_mode in ("hybrid", "full_llm"):
+        sim.driver_mode = data.driver_mode
+    if data.config:
+        allowed = {k: v for k, v in data.config.items() if k in DEFAULT_CONFIG}
+        sim.config = {**(sim.config or {}), **allowed}
+    await db.commit()
+    await db.refresh(sim)
+    return SimulationOut.model_validate(sim)
+
+
+@router.get("/{sim_id}/stream")
+async def stream_simulation(project_id: str, sim_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """SSE stream of tick / paused / error events for a running sim."""
+    await _load_sim(db, project_id, sim_id)
+    queue = sim_runner.subscribe(sim_id)
+
+    async def event_gen():
+        try:
+            # Prime the connection so EventSource fires `open` promptly.
+            yield "event: ready\ndata: {}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    evt = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+        finally:
+            sim_runner.unsubscribe(sim_id, queue)
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",
+    })
 
 
 # ── reads ────────────────────────────────────────────────────────
