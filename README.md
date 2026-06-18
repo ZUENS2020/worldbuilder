@@ -157,17 +157,23 @@ cp -r st-plugin "<SillyTavern>/data/<your-user>/extensions/worldbuilder-context"
 ### 使用
 
 1. 启动 WorldBuilder 后端（默认 `http://localhost:8000`）。
-2. 在 SillyTavern「扩展」面板展开 **🌐 WorldBuilder**，确认 API URL，可选填项目 ID（留空则自动检测第一个项目）。
-3. 正常对话即可——插件会在 `CHAT_COMPLETION_PROMPT_READY` 事件上拦截 Prompt，提取出场角色（当前角色卡名 + 消息中的 `@提及`），查询图谱上下文并注入（跳数取自项目 `context_injection` 设置，插件可通过 `?hop=` 覆盖）。
+2. 在 SillyTavern「扩展」面板展开 **🌐 WorldBuilder**：
+   - 选择 **Project**（或留空自动选第一个）
+   - **Context mode**：`visibility`（默认，按当前角色卡做战争迷雾）| `truth`（全知）| `belief`（信念副本）
+   - 可选绑定 **Simulation** 并开启 **Inject memory** / **Queue ST exchanges for writeback**
+3. 正常对话即可——插件在 `CHAT_COMPLETION_PROMPT_READY` 注入图谱/信念/记忆上下文；若启用回写，在 WB 模拟器 **「ST 回写」** 标签审阅并执行落库。
 
 > ⚠️ 若 SillyTavern 默认端口（8000）与 WorldBuilder 后端冲突，请修改其中一个的端口（例如把 SillyTavern 的 `config.yaml` 改成 `port: 8100`）。
 
 ### 工作原理
 
 ```
-对话 Prompt 就绪 → 提取出场角色 → GET /api/projects/{id}/entities/context?characters=...
-→ 后端按图距离构建 system_injection + 矛盾预警 → 作为 system 消息注入 chat 数组
+对话 Prompt 就绪 → 提取出场角色 → GET context / beliefs/context (?observer=角色卡名)
+→ 可选 GET memory-block → system 消息注入
+GENERATION_END → POST st-writeback/queue（可选）→ WB 前端审阅 / 手动或自动 apply
 ```
+
+详见 [`st-plugin/TESTING.md`](st-plugin/TESTING.md) 与 [`st-plugin/CHANGELOG.md`](st-plugin/CHANGELOG.md)。
 
 ---
 

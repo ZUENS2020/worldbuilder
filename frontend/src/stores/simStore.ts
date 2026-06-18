@@ -27,12 +27,18 @@ interface SimState {
   ticks: SimTick[];        // accumulated narrative feed (tick 1..n)
   stepping: boolean;
   error: string | null;
+  writebackItems: any[];
+  writebackPreview: any | null;
 
   loadSims: () => Promise<void>;
   selectSim: (simId: string) => Promise<void>;
   createSim: (driverMode?: string) => Promise<Simulation | null>;
   step: () => Promise<void>;
   reset: () => void;
+  loadWritebackQueue: (status?: string) => Promise<void>;
+  previewWriteback: (ids: string[], depth: string) => Promise<void>;
+  applyWriteback: (ids: string[], depth?: string) => Promise<void>;
+  updateWritebackConfig: (patch: Record<string, unknown>) => Promise<void>;
 }
 
 export const useSimStore = create<SimState>((set, get) => ({
@@ -41,6 +47,8 @@ export const useSimStore = create<SimState>((set, get) => ({
   ticks: [],
   stepping: false,
   error: null,
+  writebackItems: [],
+  writebackPreview: null,
 
   loadSims: async () => {
     const projectId = useAppStore.getState().project?.id;
@@ -105,5 +113,50 @@ export const useSimStore = create<SimState>((set, get) => ({
     }
   },
 
-  reset: () => set({ sim: null, ticks: [], error: null }),
+  reset: () => set({ sim: null, ticks: [], error: null, writebackItems: [], writebackPreview: null }),
+
+  loadWritebackQueue: async (status = 'pending') => {
+    const projectId = useAppStore.getState().project?.id;
+    const sim = get().sim;
+    if (!projectId || !sim) return;
+    try {
+      const data = await api.listWriteback(projectId, sim.id, status);
+      set({ writebackItems: data.items });
+    } catch (e: any) {
+      set({ error: String(e?.message || e) });
+    }
+  },
+
+  previewWriteback: async (ids, depth) => {
+    const projectId = useAppStore.getState().project?.id;
+    const sim = get().sim;
+    if (!projectId || !sim) return;
+    const data = await api.previewWriteback(projectId, sim.id, ids, depth);
+    set({ writebackPreview: data });
+  },
+
+  applyWriteback: async (ids, depth) => {
+    const projectId = useAppStore.getState().project?.id;
+    const sim = get().sim;
+    if (!projectId || !sim) return;
+    const res = await api.applyWriteback(projectId, sim.id, ids, depth);
+    if (res.simulation) {
+      set((s) => ({
+        sim: res.simulation,
+        sims: s.sims.map((x) => (x.id === res.simulation.id ? res.simulation : x)),
+        writebackPreview: null,
+      }));
+    }
+  },
+
+  updateWritebackConfig: async (patch) => {
+    const projectId = useAppStore.getState().project?.id;
+    const sim = get().sim;
+    if (!projectId || !sim) return;
+    const updated = await api.patchWritebackConfig(projectId, sim.id, patch);
+    set((s) => ({
+      sim: updated,
+      sims: s.sims.map((x) => (x.id === updated.id ? updated : x)),
+    }));
+  },
 }));

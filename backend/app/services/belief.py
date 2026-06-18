@@ -103,11 +103,9 @@ def _project_characters(project_id: str) -> list[Entity]:
 
 # ── seeding ──────────────────────────────────────────────────────
 
-async def seed_beliefs(db: AsyncSession, sim) -> int:
-    """Give each character a starting belief about every entity it can currently
-    see (visibility-filtered truth). Idempotent: skips if the project already has
-    any belief rows. Returns the number of belief rows created."""
-    pid = sim.project_id
+async def seed_beliefs_for_project(db: AsyncSession, project_id: str, *, tick: int = 0) -> int:
+    """Idempotent belief seed for a project (no Simulation required)."""
+    pid = project_id
     existing = (await db.execute(
         select(Belief.id).where(Belief.project_id == pid).limit(1)
     )).first()
@@ -119,16 +117,23 @@ async def seed_beliefs(db: AsyncSession, sim) -> int:
     for observer in _project_characters(pid):
         for subject in all_entities:
             if not visibility.entity_visible_to(subject, observer.id, graph_engine):
-                continue  # fog of war — observer doesn't know this entity exists
+                continue
             await _upsert_belief(
                 db, pid, observer.id, subject.id,
                 _visible_props(observer.id, subject),
                 _visible_relations(observer.id, subject.id),
-                tick=0,
+                tick=tick,
             )
             created += 1
     await db.flush()
     return created
+
+
+async def seed_beliefs(db: AsyncSession, sim) -> int:
+    """Give each character a starting belief about every entity it can currently
+    see (visibility-filtered truth). Idempotent: skips if the project already has
+    any belief rows. Returns the number of belief rows created."""
+    return await seed_beliefs_for_project(db, sim.project_id, tick=0)
 
 
 # ── mechanical sync (step 6) ─────────────────────────────────────
@@ -231,6 +236,127 @@ async def build_actor_context(
         lines.extend(believed_rel_lines)
 
     return {"system_injection": "\n".join(lines).strip()}
+
+
+async def build_scene_belief_context(
+    db: AsyncSession,
+    project_id: str,
+    observer_id: str,
+    scene_entity_ids: list[str],
+    *,
+    context_hop: int = 2,
+    world_entries: list | None = None,
+    worldbook_budget: int = 1200,
+) -> dict:
+    """ST-facing belief context for N in-scene entities + belief-known neighbors."""
+    pid = project_id
+    hop = max(1, min(5, int(context_hop)))
+    selected = [eid for eid in scene_entity_ids if eid in graph_engine.entities]
+    selected_set = set(selected)
+    lines: list[str] = []
+    warnings: list[str] = []
+
+    in_scene = {
+        eid for eid in selected
+        if (e := graph_engine.entities.get(eid))
+        and visibility.entity_visible_to(e, observer_id, graph_engine)
+    }
+
+    if world_entries:
+        wb = worldbook.build_injection(
+            world_entries, in_scene, observer_id=observer_id, token_budget=worldbook_budget,
+        )
+        if wb:
+            lines.append(wb)
+            lines.append("")
+
+    believed_rel_lines: list[str] = []
+    rel_seen: set = set()
+
+    for sid in selected:
+        subject = graph_engine.entities.get(sid)
+        if not subject:
+            continue
+        if not visibility.entity_visible_to(subject, observer_id, graph_engine):
+            continue
+        b = await _get_belief(db, pid, observer_id, sid)
+        if b is not None:
+            props = b.believed_properties or {}
+            rels = b.believed_relations or []
+        else:
+            props = _visible_props(observer_id, subject)
+            rels = _visible_relations(observer_id, sid)
+        type_label = engine_mod.ENTITY_TYPE_LABELS.get(subject.type, subject.type)
+        tag = "（你）" if sid == observer_id else ""
+        lines.extend(_render_belief_block(subject.name + tag, type_label, props))
+        lines.append("")
+        for r in rels:
+            key = (r.get("source_id"), r.get("target_id"), r.get("type"))
+            if key in rel_seen:
+                continue
+            rel_seen.add(key)
+            src = graph_engine.entities.get(r.get("source_id"))
+            tgt = graph_engine.entities.get(r.get("target_id"))
+            if not src or not tgt:
+                continue
+            if r.get("source_id") not in selected_set and r.get("target_id") not in selected_set:
+                continue
+            rlabel = engine_mod.RELATION_TYPE_LABELS.get(r.get("type"), r.get("type"))
+            line = f"{src.name} --[{rlabel}]--> {tgt.name}"
+            if r.get("description"):
+                line += f"（{r['description']}）"
+            believed_rel_lines.append(line)
+            w = r.get("weight") or 0.5
+            if r.get("type") in ("enemy", "rival") and w > 0.7:
+                warnings.append(f"{src.name}与{tgt.name}当前关系：{rlabel}（强度{w:.0%}）")
+
+    if believed_rel_lines:
+        lines.append("【你所知的关系网】")
+        lines.extend(believed_rel_lines)
+        lines.append("")
+
+    # N-hop neighbors: belief blurb if known, else visibility-filtered one-liner.
+    neighbor_ids: set[str] = set()
+    for eid in selected:
+        if eid not in graph_engine.entities:
+            continue
+        result = graph_engine.get_neighbors(eid, hop=hop, project_id=pid)
+        for nid in result.get("hop_map", {}):
+            if nid in selected_set:
+                continue
+            ent = graph_engine.entities.get(nid)
+            if not ent or not visibility.entity_visible_to(ent, observer_id, graph_engine):
+                continue
+            neighbor_ids.add(nid)
+
+    neighbor_lines = []
+    for nid in sorted(neighbor_ids):
+        ent = graph_engine.entities.get(nid)
+        if not ent:
+            continue
+        b = await _get_belief(db, pid, observer_id, nid)
+        if b is not None:
+            props = b.believed_properties or {}
+            blurb = props.get("description") or props.get("personality") or ""
+            if blurb and len(blurb) > 40:
+                blurb = blurb[:40] + "…"
+            type_label = engine_mod.ENTITY_TYPE_LABELS.get(ent.type, ent.type)
+            neighbor_lines.append(
+                f"{ent.name}（{type_label}）" + (f"：{blurb}" if blurb else "")
+            )
+        else:
+            neighbor_lines.append(graph_engine._entity_oneliner(ent, observer_id=observer_id))
+
+    if neighbor_lines:
+        lines.append("【你所知的关联】")
+        lines.extend(neighbor_lines)
+
+    system_injection = "\n".join(lines).strip()
+    return {
+        "system_injection": system_injection,
+        "active_warnings": warnings,
+        "token_count": len(system_injection) // 2,
+    }
 
 
 # ── belief reconciliation on reveal (step 3c) ────────────────────

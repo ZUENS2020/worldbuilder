@@ -32,6 +32,12 @@ DEFAULT_CONFIG = {
     "scheduler_strategy": "weighted",   # weighted | random
     "memory_recent_k": 8,
     "memory_compact_threshold": 12,
+    "generate_events": True,          # Oracle crystallizes significant happenings into event nodes
+    "event_min_significance": 0.5,    # only events at/above this significance become nodes
+    "writeback_trigger": "manual",       # manual | every_n_rounds | auto_llm
+    "writeback_every_n": 3,
+    "writeback_depth": "mechanical",     # mechanical | llm_oracle
+    "st_source_label": "",
 }
 
 
@@ -293,6 +299,107 @@ async def _apply_mutations(
     return applied
 
 
+# ── event crystallization ────────────────────────────────────────
+
+def _latest_sim_event(pid: str, sim_id: str, before_tick: int) -> Entity | None:
+    """The most recent event node this sim emitted at a tick < before_tick,
+    used to chain a temporal `followed_by` edge between consecutive events."""
+    best = None
+    best_tick = -1
+    for eid in graph_engine.project_entities.get(pid, set()):
+        e = graph_engine.entities.get(eid)
+        if not e or e.type != "event":
+            continue
+        meta = (e.properties or {}).get("_sim")
+        if not isinstance(meta, dict) or meta.get("sim_id") != sim_id:
+            continue
+        t = meta.get("tick", -1)
+        if t < before_tick and t > best_tick:
+            best, best_tick = e, t
+    return best
+
+
+async def _apply_events(
+    db: AsyncSession, sim: Simulation, events: list[dict], tick: int, min_significance: float
+) -> list[dict]:
+    """Crystallize the Oracle's significant happenings into `event` entity nodes,
+    wiring each to its participants (`participated`) and to the previous sim event
+    (`followed_by`). Dual-written to DB + graph_engine like every other mutation."""
+    pid = sim.project_id
+    applied: list[dict] = []
+    name_idx = _name_index(pid)
+    prev_event = _latest_sim_event(pid, sim.id, before_tick=tick)
+
+    for ev in events:
+        name = (ev.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            sig = float(ev.get("significance", 0.5))
+        except (TypeError, ValueError):
+            sig = 0.5
+        if sig < min_significance:
+            continue
+
+        # Ensure a unique entity name.
+        final_name = name
+        n = 2
+        while final_name in name_idx:
+            final_name = f"{name}（{n}）"
+            n += 1
+
+        event = Entity(
+            id=str(uuid.uuid4()),
+            name=final_name,
+            type="event",
+            properties={
+                "description": ev.get("summary", ""),
+                "time": f"t{tick}",
+                "_sim": {"sim_id": sim.id, "tick": tick, "significance": sig},
+            },
+            project_id=pid,
+        )
+        db.add(event)
+        await db.flush()
+        graph_engine.add_entity(event)
+        name_idx[final_name] = event
+        applied.append({"op": "create_event", "name": final_name, "tick": tick,
+                        "significance": sig, "summary": ev.get("summary", "")})
+
+        # participants → event
+        for pname in ev.get("participants", []):
+            actor = name_idx.get(pname)
+            if not actor or actor.type != "character":
+                continue
+            rel = Relation(
+                id=str(uuid.uuid4()),
+                source_id=actor.id, target_id=event.id,
+                type="participated", weight=max(0.3, min(1.0, sig)),
+                properties={}, project_id=pid,
+            )
+            db.add(rel)
+            await db.flush()
+            graph_engine.add_relation(rel)
+            applied.append({"op": "create_relation", "source": actor.name,
+                            "target": final_name, "type": "participated"})
+
+        # temporal chain: previous sim event → this one
+        if prev_event is not None:
+            rel = Relation(
+                id=str(uuid.uuid4()),
+                source_id=prev_event.id, target_id=event.id,
+                type="followed_by", weight=0.6, properties={}, project_id=pid,
+            )
+            db.add(rel)
+            await db.flush()
+            graph_engine.add_relation(rel)
+            applied.append({"op": "create_relation", "source": prev_event.name,
+                            "target": final_name, "type": "followed_by"})
+        prev_event = event
+
+    return applied
+
+
 # ── snapshot ─────────────────────────────────────────────────────
 
 async def _build_snapshot(db: AsyncSession, sim: Simulation) -> dict:
@@ -325,6 +432,8 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
     recent_k = int(_cfg(sim, "memory_recent_k") or 8)
     threshold = int(_cfg(sim, "memory_compact_threshold") or 12)
     allow_new = bool(_cfg(sim, "allow_new_entities"))
+    gen_events = bool(_cfg(sim, "generate_events"))
+    event_min_sig = float(_cfg(sim, "event_min_significance") or 0.5)
     temperature = float(_cfg(sim, "temperature") or 0.8)
 
     metrics = {"llm_calls": 0, "encounters": 0, "nudges": 0, "mutation_count": 0}
@@ -383,13 +492,22 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
             if e
         ]
         verdict = await ai_service.ai_adjudicate(
-            scenes, catalog, allow_new_entities=allow_new, config=config,
+            scenes, catalog, allow_new_entities=allow_new,
+            generate_events=gen_events, config=config,
         )
         metrics["llm_calls"] += 1
         # 4. apply mutations (dual-write)
         applied_mutations = await _apply_mutations(
             db, sim, verdict.get("mutations", []), verdict.get("new_entities", []),
         )
+        # 4b. crystallize significant happenings into event nodes (+ participated /
+        #     followed_by edges) so the world's history accretes on the graph.
+        if gen_events:
+            event_ops = await _apply_events(
+                db, sim, verdict.get("events", []), tick, event_min_sig,
+            )
+            applied_mutations.extend(event_ops)
+            metrics["events"] = sum(1 for o in event_ops if o.get("op") == "create_event")
     metrics["mutation_count"] = len(applied_mutations)
 
     # 3c. Oracle belief re-cognition — when a property was just opened to a

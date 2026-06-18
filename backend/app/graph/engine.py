@@ -38,7 +38,7 @@ PROPERTY_KEY_LABELS = {
 }
 # Property keys that are redundant with the entity name / internal — skip.
 # Includes visibility meta-fields (_visibility, _prop_visibility) from visibility.py.
-_SKIP_PROP_KEYS = {"label", "name", "_property_order"} | visibility.VISIBILITY_META_KEYS
+_SKIP_PROP_KEYS = {"label", "name", "_property_order", "_sim"} | visibility.VISIBILITY_META_KEYS
 
 
 def _format_props(props: dict) -> list[str]:

@@ -86,6 +86,43 @@ export const api = {
   getBeliefs: (projectId: string, simId: string, observerId: string) =>
     request<any[]>(`/projects/${projectId}/simulations/${simId}/beliefs?observer=${observerId}`),
 
+  seedBeliefs: (projectId: string) =>
+    request<{ created: number }>(`/projects/${projectId}/beliefs/seed`, { method: 'POST' }),
+
+  getBeliefContext: (projectId: string, observer: string, characters: string, hop?: number) => {
+    const params = new URLSearchParams({ observer, characters });
+    if (hop != null) params.set('hop', String(hop));
+    return request<any>(`/projects/${projectId}/beliefs/context?${params}`);
+  },
+
+  getMemoryBlock: (projectId: string, simId: string, entity: string, recentK = 8) =>
+    request<{ block: string; token_count: number }>(
+      `/projects/${projectId}/simulations/${simId}/memory-block?entity=${encodeURIComponent(entity)}&recent_k=${recentK}`,
+    ),
+
+  listWriteback: (projectId: string, simId: string, status = 'pending') =>
+    request<{ items: any[]; pending_count: number }>(
+      `/projects/${projectId}/simulations/${simId}/st-writeback?status=${status}`,
+    ),
+  queueWriteback: (projectId: string, simId: string, body: object) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}/st-writeback/queue`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  previewWriteback: (projectId: string, simId: string, ids: string[], depth: string) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}/st-writeback/preview`, {
+      method: 'POST', body: JSON.stringify({ ids, depth }),
+    }),
+  applyWriteback: (projectId: string, simId: string, ids: string[], depth?: string) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}/st-writeback/apply`, {
+      method: 'POST', body: JSON.stringify({ ids, depth }),
+    }),
+  discardWriteback: (projectId: string, simId: string, itemId: string) =>
+    request(`/projects/${projectId}/simulations/${simId}/st-writeback/${itemId}`, { method: 'DELETE' }),
+  patchWritebackConfig: (projectId: string, simId: string, patch: object) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}/st-writeback/config`, {
+      method: 'PATCH', body: JSON.stringify(patch),
+    }),
+
   // World Book (P3)
   listWorldEntries: (projectId: string) =>
     request<any[]>(`/projects/${projectId}/world-entries`),

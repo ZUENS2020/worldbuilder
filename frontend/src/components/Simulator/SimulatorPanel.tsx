@@ -4,10 +4,12 @@ import { useAppStore } from '../../stores/appStore';
 import InteractionFeed from './InteractionFeed';
 import BeliefPanel from './BeliefPanel';
 
+import WritebackPanel from './WritebackPanel';
+
 export default function SimulatorPanel() {
   const { sims, sim, stepping, error, loadSims, selectSim, createSim, step, reset } = useSimStore();
   const projectId = useAppStore((s) => s.project?.id);
-  const [tab, setTab] = useState<'feed' | 'belief'>('feed');
+  const [tab, setTab] = useState<'feed' | 'belief' | 'writeback'>('feed');
 
   // Reload the simulation list whenever the active project changes.
   useEffect(() => {
@@ -77,9 +79,17 @@ export default function SimulatorPanel() {
               className={`mt-btn${tab === 'belief' ? ' active' : ''}`}
               style={{ fontSize: 11, padding: '3px 10px' }}
               onClick={() => setTab('belief')}
-              title="对照某角色的信念副本与世界真相（信息差 / 战争迷雾）"
+              title="对照某角色的信念副本与世界真相"
             >
               信念 / 真相
+            </button>
+            <button
+              className={`mt-btn${tab === 'writeback' ? ' active' : ''}`}
+              style={{ fontSize: 11, padding: '3px 10px' }}
+              onClick={() => setTab('writeback')}
+              title="审阅 SillyTavern 对话待回写队列"
+            >
+              ST 回写
             </button>
           </div>
         )}
@@ -97,8 +107,10 @@ export default function SimulatorPanel() {
           </div>
         ) : tab === 'feed' ? (
           <InteractionFeed />
-        ) : (
+        ) : tab === 'belief' ? (
           <BeliefPanel />
+        ) : (
+          <WritebackPanel />
         )}
       </div>
     </div>

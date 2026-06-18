@@ -134,3 +134,23 @@ class AgentMemory(Base):
     salience = Column(Float, default=0.5)
     properties = Column(JSON, default=dict)      # e.g. {compacted_into: <summary_id>}
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class StWritebackQueue(Base):
+    """Pending SillyTavern chat exchanges awaiting user review / writeback apply."""
+    __tablename__ = "st_writeback_queue"
+
+    id = Column(String, primary_key=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    simulation_id = Column(String, ForeignKey("simulations.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String, default="pending")  # pending | processing | applied | rejected | failed
+    round_index = Column(Integer, default=0)
+    observer_id = Column(String, ForeignKey("entities.id", ondelete="SET NULL"), nullable=True)
+    partner_id = Column(String, ForeignKey("entities.id", ondelete="SET NULL"), nullable=True)
+    user_message = Column(Text, default="")
+    assistant_message = Column(Text, default="")
+    source_meta = Column(JSON, default=dict)
+    preview = Column(JSON, default=dict)
+    result = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    applied_at = Column(DateTime, nullable=True)

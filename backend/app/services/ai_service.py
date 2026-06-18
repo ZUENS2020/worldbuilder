@@ -272,6 +272,7 @@ async def ai_adjudicate(
     entity_catalog: list[dict],
     *,
     allow_new_entities: bool = False,
+    generate_events: bool = False,
     config: dict | None = None,
     temperature: float = 0.4,
 ) -> dict:
@@ -279,7 +280,9 @@ async def ai_adjudicate(
     resolve them into ONE consistent set of canonical mutations (conflict
     strategy = oracle_merge). Mutations reference entities by name.
 
-    Returns {"mutations": [...], "new_entities": [...]}.
+    Returns {"mutations": [...], "new_entities": [...], "events": [...]}.
+    Events (when generate_events) are significant happenings the Oracle judges
+    worth crystallizing into an event node: {name, summary, participants, significance}.
     Mutation ops:
       - update_relation: {op, source, target, type?, weight_delta?, weight?, description?}
       - create_relation: {op, source, target, type, weight, description?}
@@ -298,10 +301,23 @@ async def ai_adjudicate(
     )
 
     new_entity_rule = (
-        '允许创造新实体：若叙事中出现全新的人物/地点/物品/事件，用 create_entity 产出，'
+        '允许创造新实体：若叙事中出现全新的人物/地点/物品，用 create_entity 产出，'
         '由你负责命名（不得与已有实体重名）与定类型。'
         if allow_new_entities else
         '不允许创造新实体：只能在已有实体之间产生变化。'
+    )
+
+    event_rule = (
+        '\n- 事件结晶：若本 tick 发生了**有叙事分量的事件**（关系发生转折、立下誓言、'
+        '冲突爆发、秘密揭露、重要决定等），用 events 把它凝结成一个事件节点——'
+        'name 是简短事件名，summary 是一句话概述，participants 是亲历者实体名列表，'
+        'significance 是重要度 0~1（仅记录真正值得留痕的事件，琐碎寒暄不必产出）。'
+        if generate_events else ''
+    )
+    event_schema = (
+        ',\n  "events": [\n    {"name": "事件名", "summary": "一句话概述", '
+        '"participants": ["亲历者1", "亲历者2"], "significance": 0.7}\n  ]'
+        if generate_events else ''
     )
 
     prompt = f"""你是关系演化模拟器的「全知裁决者」(Oracle)。本 tick 发生了若干场相遇，请把它们整体解算成「一套」无矛盾的世界变更（canonical mutations）。
@@ -317,7 +333,7 @@ async def ai_adjudicate(
 - 内部状态（mood 情绪 / goal 目标）写进 update_entity 的 properties。
 - {new_entity_rule}
 - 信息可见度落地：若某意图涉及「谁能知道某条信息」（揭示秘密给特定人、向某些人隐瞒某事），用 set_prop_visibility 把它落成确定名单——level 用 entities 时，entities 必须是**具体实体名**（你把「盟友」等群体展开成具体的人），private 表示仅自己可见，public 表示公开。
-- 没有实质变化的场景可以不产出 mutation。
+- 没有实质变化的场景可以不产出 mutation。{event_rule}
 
 只返回 JSON：
 {{
@@ -329,7 +345,7 @@ async def ai_adjudicate(
   ],
   "new_entities": [
     {{"op": "create_entity", "name": "新名", "type": "character", "properties": {{}}}}
-  ]
+  ]{event_schema}
 }}
 
 关系类型可选：ally, enemy, lover, family, rival, mentor, subordinate, member_of, located_at, participated, caused, followed_by, holds, owns, custom。"""
@@ -343,9 +359,10 @@ async def ai_adjudicate(
         return {
             "mutations": parsed.get("mutations", []),
             "new_entities": parsed.get("new_entities", []) if allow_new_entities else [],
+            "events": parsed.get("events", []) if generate_events else [],
         }
     except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-        return {"mutations": [], "new_entities": [], "error": str(e)}
+        return {"mutations": [], "new_entities": [], "events": [], "error": str(e)}
 
 
 async def ai_resolve_visibility(
