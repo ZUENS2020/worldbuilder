@@ -2,15 +2,18 @@ import { useState, useMemo, useRef } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { ENTITY_CONFIG, PALETTE_CATEGORIES, TAG_COLORS } from '../../types';
 import type { EntityType, Tag } from '../../types';
+import { pickCharacterCardFile } from '../../utils/fileIo';
 
 export const DND_MIME = 'application/worldbuilder-entity-type';
 
 export default function Palette() {
   const {
-    addEntity, project, entities, selectedEntityIds,
+    addEntity, importCharacterCard, project, entities, selectedEntityIds,
     createOpen, setCreateOpen, selectEntity, focusOnEntity,
     tags, addTag, removeTag, renameTag, addEntityToTag, removeEntityFromTag,
   } = useAppStore();
+
+  const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<EntityType>('character');
@@ -35,6 +38,20 @@ export default function Palette() {
     await addEntity({ name: newName.trim(), type: newType });
     setNewName('');
     setCreateOpen(false);
+  };
+
+  const handleImportCard = async () => {
+    if (!project) return;
+    try {
+      setImportStatus(null);
+      const card = await pickCharacterCardFile();
+      if (!card) return; // user cancelled
+      const entity = await importCharacterCard(card);
+      setImportStatus(`✓ 已导入「${entity.name}」`);
+      window.setTimeout(() => setImportStatus(null), 3500);
+    } catch (e) {
+      setImportStatus(`⚠️ ${e instanceof Error ? e.message : '导入失败'}`);
+    }
   };
 
   const onDragStart = (e: React.DragEvent, type: EntityType) => {
@@ -97,6 +114,27 @@ export default function Palette() {
           placeholder="🔍 搜索实体..."
           style={inputStyle}
         />
+        <button
+          onClick={handleImportCard}
+          disabled={!project}
+          className="mt-btn"
+          style={{
+            width: '100%', marginTop: 6, justifyContent: 'center',
+            fontSize: 11, border: '1px dashed var(--mt-border)',
+            color: 'var(--mt-text-muted)',
+          }}
+          title="导入 SillyTavern / TavernAI 角色卡（.json 或内嵌 .png）"
+        >
+          🃏 导入角色卡
+        </button>
+        {importStatus && (
+          <div style={{
+            marginTop: 4, fontSize: 10, lineHeight: 1.4,
+            color: importStatus.startsWith('⚠️') ? '#c0392b' : 'var(--mt-accent-dark)',
+          }}>
+            {importStatus}
+          </div>
+        )}
       </div>
 
       <div className="mt-panel-body">

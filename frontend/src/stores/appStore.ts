@@ -29,6 +29,7 @@ interface AppState {
 
   // Entity CRUD
   addEntity: (data: { name: string; type: string; properties?: any }) => Promise<Entity>;
+  importCharacterCard: (card: unknown) => Promise<Entity>;
   updateEntity: (id: string, data: any) => Promise<void>;
   removeEntity: (id: string) => Promise<void>;
 
@@ -224,6 +225,34 @@ export const useAppStore = create<AppState>((set, get) => ({
       explorationHistory: s.explorationMode
         ? _pushHist(s.explorationHistory, s.visibleEntityIds)
         : s.explorationHistory,
+    }));
+    return entity;
+  },
+
+  importCharacterCard: async (card) => {
+    const projectId = get().project?.id;
+    if (!projectId) throw new Error('No project selected');
+    // Backend parses the card (V1/V2/V3), creates the character entity and any
+    // embedded lorebook as entity-scoped World Book entries.
+    const entity = await api.importCharacterCard(projectId, card);
+    set((s) => ({
+      entities: [...s.entities, entity],
+      selectedEntityId: entity.id,
+      selectedEntityIds: [entity.id],
+      visibleEntityIds: s.explorationMode
+        ? new Set(s.visibleEntityIds).add(entity.id)
+        : s.visibleEntityIds,
+      explorationHistory: s.explorationMode
+        ? _pushHist(s.explorationHistory, s.visibleEntityIds)
+        : s.explorationHistory,
+      // Animate the freshly imported node into view.
+      revealSignal: {
+        nonce: (s.revealSignal?.nonce ?? 0) + 1,
+        pivotId: entity.id,
+        resultEntityIds: [entity.id],
+        newEntityIds: [entity.id],
+        relationIds: [],
+      },
     }));
     return entity;
   },

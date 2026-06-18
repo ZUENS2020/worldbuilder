@@ -30,6 +30,7 @@ RELATION_TYPE_LABELS = {
 # Known property keys → Chinese display labels. Unknown keys are shown as-is.
 PROPERTY_KEY_LABELS = {
     "personality": "性格", "goal": "目标", "description": "描述", "desc": "描述",
+    "scenario": "情景",
     "time": "时间", "date": "日期", "location": "地点", "running_style": "跑法",
     "va": "声优", "height": "身高", "age": "年龄", "gender": "性别",
     "appearance": "外貌", "background": "背景", "occupation": "职业",
@@ -38,7 +39,7 @@ PROPERTY_KEY_LABELS = {
 }
 # Property keys that are redundant with the entity name / internal — skip.
 # Includes visibility meta-fields (_visibility, _prop_visibility) from visibility.py.
-_SKIP_PROP_KEYS = {"label", "name", "_property_order", "_sim"} | visibility.VISIBILITY_META_KEYS
+_SKIP_PROP_KEYS = {"label", "name", "_property_order", "_sim", "_st_card"} | visibility.VISIBILITY_META_KEYS
 
 
 def _format_props(props: dict) -> list[str]:

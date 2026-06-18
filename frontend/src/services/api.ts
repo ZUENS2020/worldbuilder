@@ -41,6 +41,8 @@ export const api = {
     request(`/projects/${projectId}/entities/${id}`, { method: 'DELETE' }),
   getNeighbors: (projectId: string, entityId: string, hop = 2) =>
     request<any>(`/projects/${projectId}/entities/${entityId}/neighbors?hop=${hop}`),
+  importCharacterCard: (projectId: string, card: unknown) =>
+    request<any>(`/projects/${projectId}/entities/import-card`, { method: 'POST', body: JSON.stringify(card) }),
 
   // Relations
   listRelations: (projectId: string) => request<any[]>(`/projects/${projectId}/relations`),

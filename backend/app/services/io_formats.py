@@ -154,6 +154,66 @@ def serialize_world_entries(entries: list) -> dict:
     }
 
 
+# ── Character card (TavernAI / SillyTavern) ──────────────────────
+
+# ST-specific card fields that aren't graph properties but are preserved so the
+# st-plugin can still drive immersive roleplay (greeting, examples, prompts).
+_ST_CARD_FIELDS = (
+    "first_mes", "mes_example", "system_prompt", "post_history_instructions",
+    "creator_notes", "alternate_greetings", "creator", "character_version",
+)
+
+
+def parse_character_card(data: Any) -> dict:
+    """Parse a TavernAI/SillyTavern character card into entity fields.
+
+    Accepts a V1 flat card (``{name, description, personality, scenario, ...}``)
+    or a V2/V3 card (``{spec, data:{...}}``). Recognized narrative fields map to
+    graph property keys the engine knows (``description``/``personality``/
+    ``scenario``); the remaining ST-only fields are stashed under
+    ``properties._st_card`` so they stay out of context injection but remain
+    available as the roleplay output. An embedded ``character_book`` is returned
+    separately for the caller to import as entity-scoped World Book entries.
+
+    Returns ``{name, type:'character', properties, character_book}``.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("角色卡格式无法识别")
+    core = data.get("data") if isinstance(data.get("data"), dict) else data
+
+    name = str(core.get("name") or core.get("char_name") or "").strip()
+    if not name:
+        raise ValueError("角色卡缺少 name 字段")
+
+    props: dict = {}
+    for src, dst in (("description", "description"), ("personality", "personality"),
+                     ("scenario", "scenario")):
+        val = str(core.get(src) or "").strip()
+        if val:
+            props[dst] = val
+
+    st_card: dict = {}
+    for k in _ST_CARD_FIELDS:
+        v = core.get(k)
+        if v not in (None, "", [], {}):
+            st_card[k] = v
+    spec = data.get("spec") or core.get("spec")
+    if spec:
+        st_card["spec"] = str(spec)
+    tags = _as_str_list(core.get("tags"))
+    if tags:
+        st_card["tags"] = tags
+    if st_card:
+        props["_st_card"] = st_card
+
+    character_book = core.get("character_book")
+    if not isinstance(character_book, dict):
+        character_book = None
+
+    return {"name": name, "type": "character", "properties": props,
+            "character_book": character_book}
+
+
 # ── Project graph bundle ─────────────────────────────────────────
 
 def serialize_project_bundle(project, entities: list, relations: list, world_entries: list) -> dict:

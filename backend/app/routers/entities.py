@@ -1,8 +1,9 @@
 """Entity CRUD + graph query API routes."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from typing import Any
 import uuid
 
 from app.database import get_db
@@ -10,6 +11,7 @@ from app.models.models import Entity, Project, WorldEntry
 from app.schemas import EntityCreate, EntityUpdate, EntityOut, NeighborResult, GraphContext
 from app.graph.engine import graph_engine
 from app.graph.hop_settings import resolve_graph_hops
+from app.services import io_formats
 
 router = APIRouter(prefix="/api/projects/{project_id}/entities", tags=["entities"])
 
@@ -28,6 +30,49 @@ async def create_entity(
         project_id=project_id,
     )
     db.add(entity)
+    await db.commit()
+    await db.refresh(entity)
+    graph_engine.add_entity(entity)
+    return entity
+
+
+@router.post("/import-card", response_model=EntityOut)
+async def import_character_card(
+    project_id: str,
+    payload: Any = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import a SillyTavern / TavernAI character card (V1 flat or V2/V3) as a new
+    character entity (P6 ST bridge). An embedded ``character_book`` is imported as
+    entity-scoped World Book entries mounted on the new character.
+    """
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    try:
+        card = io_formats.parse_character_card(payload)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    entity = Entity(
+        id=str(uuid.uuid4()),
+        name=card["name"],
+        type=card["type"],
+        properties=card["properties"],
+        project_id=project_id,
+    )
+    db.add(entity)
+
+    # Mount the card's lorebook (if any) as entity-scoped World Book entries.
+    if card.get("character_book"):
+        try:
+            for fields in io_formats.parse_world_entries(card["character_book"]):
+                fields["scope"] = "entity"
+                fields["entity_ids"] = [entity.id]
+                db.add(WorldEntry(id=str(uuid.uuid4()), project_id=project_id, **fields))
+        except ValueError:
+            pass  # malformed embedded book — keep the entity, skip the book
+
     await db.commit()
     await db.refresh(entity)
     graph_engine.add_entity(entity)
