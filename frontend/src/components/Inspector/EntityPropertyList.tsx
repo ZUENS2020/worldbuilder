@@ -5,7 +5,10 @@ import {
   buildPropertiesWithOrder,
   getOrderedPropertyEntries,
   reorderPropertyEntries,
+  PROP_VISIBILITY_KEY,
 } from '../../utils/propertyOrder';
+
+type PropVisRule = { level: 'public' | 'private' | 'entities'; entities?: string[] };
 
 type EntityPropertyListProps = {
   entityId: string;
@@ -17,6 +20,12 @@ type EntityPropertyListProps = {
   fieldStyle: React.CSSProperties;
   sectionLabel: React.CSSProperties;
   onAdd: () => void;
+  /** Other entities in the project, for the "specific entities" whitelist. */
+  allEntities?: { id: string; name: string }[];
+};
+
+const VIS_ICON: Record<PropVisRule['level'], string> = {
+  public: '🌐', private: '🔒', entities: '👥',
 };
 
 export default function EntityPropertyList({
@@ -29,10 +38,23 @@ export default function EntityPropertyList({
   fieldStyle,
   sectionLabel,
   onAdd,
+  allEntities = [],
 }: EntityPropertyListProps) {
   const propertyEntries = getOrderedPropertyEntries(properties);
   const propertiesRef = useRef(properties);
   propertiesRef.current = properties;
+
+  const [visKey, setVisKey] = useState<string | null>(null);
+
+  const propVisMap = (properties[PROP_VISIBILITY_KEY] as Record<string, PropVisRule>) || {};
+
+  const setPropVis = (key: string, rule: PropVisRule | null) => {
+    const base = propertiesRef.current || {};
+    const map = { ...((base[PROP_VISIBILITY_KEY] as Record<string, PropVisRule>) || {}) };
+    if (rule === null || rule.level === 'public') delete map[key];
+    else map[key] = rule;
+    updateEntity(entityId, { properties: { ...base, [PROP_VISIBILITY_KEY]: map } });
+  };
 
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -153,6 +175,17 @@ export default function EntityPropertyList({
                 </span>
                 <span style={{ color: 'var(--mt-text-muted)', fontSize: 10, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{key}</span>
                 <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    className="mt-btn"
+                    style={{
+                      fontSize: 9, padding: '0 5px', height: 16,
+                      color: (propVisMap[key]?.level ?? 'public') === 'public' ? 'var(--mt-text-faint)' : 'var(--mt-accent)',
+                    }}
+                    onClick={() => setVisKey(visKey === key ? null : key)}
+                    title={`可见度：${propVisMap[key]?.level === 'private' ? '私密' : propVisMap[key]?.level === 'entities' ? '指定实体' : '公开'}`}
+                  >
+                    {VIS_ICON[propVisMap[key]?.level ?? 'public']}
+                  </button>
                   {isLong && (
                     <button
                       className="mt-btn"
@@ -204,6 +237,56 @@ export default function EntityPropertyList({
                   onCommit={(v) => handlePropertyChange(key, v)}
                   style={fieldStyle}
                 />
+              )}
+
+              {visKey === key && (
+                <div style={{
+                  marginTop: 5, padding: 7, borderRadius: 4,
+                  border: '1px solid var(--mt-accent)', background: 'var(--mt-sel-fill)',
+                }}>
+                  <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 4 }}>谁能看到此属性</div>
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                    {(['public', 'private', 'entities'] as const).map((lvl) => {
+                      const active = (propVisMap[key]?.level ?? 'public') === lvl;
+                      return (
+                        <button
+                          key={lvl}
+                          className={`mt-btn${active ? ' active' : ''}`}
+                          style={{ fontSize: 10, padding: '2px 7px', border: `1px solid ${active ? 'var(--mt-accent)' : 'var(--mt-border)'}` }}
+                          onClick={() => setPropVis(key, lvl === 'entities'
+                            ? { level: 'entities', entities: propVisMap[key]?.entities ?? [] }
+                            : { level: lvl })}
+                        >
+                          {VIS_ICON[lvl]} {lvl === 'public' ? '公开' : lvl === 'private' ? '私密' : '指定'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(propVisMap[key]?.level === 'entities') && (
+                    <div style={{ maxHeight: 140, overflowY: 'auto', border: '1px solid var(--mt-border-soft)', borderRadius: 3, background: '#fff', padding: 4 }}>
+                      {allEntities.length === 0 && (
+                        <div style={{ fontSize: 10, color: 'var(--mt-text-faint)' }}>（无其他实体）</div>
+                      )}
+                      {allEntities.map((e) => {
+                        const checked = (propVisMap[key]?.entities ?? []).includes(e.id);
+                        return (
+                          <label key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, padding: '1px 2px', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                const cur = propVisMap[key]?.entities ?? [];
+                                const next = checked ? cur.filter((x) => x !== e.id) : [...cur, e.id];
+                                setPropVis(key, { level: 'entities', entities: next });
+                              }}
+                            />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           );

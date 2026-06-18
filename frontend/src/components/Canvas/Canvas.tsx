@@ -30,6 +30,7 @@ import type { Entity, Relation, EntityType } from '../../types';
 import { calculateLayout, placeAroundPivot } from '../../utils/layout';
 import { mergeSelection } from '../../utils/selection';
 import { captureNodePositions, useCanvasHistory } from '../../hooks/useCanvasHistory';
+import { computeVisibleEntityIds } from '../../utils/visibility';
 
 const nodeTypes = { entity: EntityNode };
 const edgeTypes = { relation: RelationEdge };
@@ -104,6 +105,7 @@ export default function Canvas() {
     explorationMode, setExplorationMode, visibleEntityIds, revealSignal,
     showAllEntities, undoExploration, resetExploration, explorationHistory,
     setInspectorTab, activeTransformHighlight, clearTransformHighlight,
+    tags,
   } = useAppStore();
   const rf = useReactFlow();
 
@@ -112,8 +114,24 @@ export default function Canvas() {
   const preDragSnapshot = useRef<ReturnType<typeof captureNodePositions> | null>(null);
   const isDraggingNodes = useRef(false);
 
-  // The "visible subgraph" filter — null in overview mode (show everything).
-  const visibleSet = explorationMode ? visibleEntityIds : null;
+  // ── "View as / 以…视角" observer mode (P2 fog of war) ──
+  // null = 全知/作者视角(canonical truth). Otherwise filter canonical graph by
+  // what `observerId` can see per the visibility model.
+  const [observerId, setObserverId] = useState<string | null>(null);
+  const observerVisibleSet = useMemo(
+    () => (observerId ? computeVisibleEntityIds(observerId, entities, relations, tags) : null),
+    [observerId, entities, relations, tags],
+  );
+
+  // The "visible subgraph" filter combines exploration pinning and observer fog.
+  // null in overview mode + 全知 (show everything); otherwise the intersection.
+  const explorationSet = explorationMode ? visibleEntityIds : null;
+  const visibleSet = useMemo(() => {
+    if (!explorationSet && !observerVisibleSet) return null;
+    if (!observerVisibleSet) return explorationSet;
+    if (!explorationSet) return observerVisibleSet;
+    return new Set([...explorationSet].filter((id) => observerVisibleSet.has(id)));
+  }, [explorationSet, observerVisibleSet]);
 
   const [relationFilter, setRelationFilter] = useState<string | undefined>(undefined);
   const [relPicker, setRelPicker] = useState<{ source: string; target: string; x: number; y: number } | null>(null);
@@ -645,8 +663,47 @@ export default function Canvas() {
           <LassoCaptureLayer nodes={nodes} onComplete={handleBoxSelectComplete} />
         )}
 
-        {/* Exploration mode controls (Maltego-style incremental investigation) */}
+        {/* "View as / 以…视角" observer selector — P2 fog of war */}
+        {/* Single top-right stack: "View as" observer selector + exploration controls.
+            Both must live in ONE Panel, otherwise React Flow anchors each to the
+            same corner and they overlap. */}
         <Panel position="top-right">
+          <div
+            style={{
+              background: 'var(--mt-panel)', border: '1px solid var(--mt-border)',
+              borderRadius: 4, padding: '5px 7px', display: 'flex', gap: 6,
+              alignItems: 'center', boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+              marginBottom: 6,
+            }}
+          >
+            <span style={{ fontSize: 11, color: observerId ? 'var(--mt-accent-dark)' : 'var(--mt-text-muted)', fontWeight: 600 }}>
+              {observerId ? '👁 视角' : '👁 全知'}
+            </span>
+            <select
+              value={observerId ?? ''}
+              onChange={(e) => setObserverId(e.target.value || null)}
+              style={{
+                fontSize: 11, padding: '2px 4px', maxWidth: 150,
+                border: `1px solid ${observerId ? 'var(--mt-accent)' : 'var(--mt-border)'}`,
+                borderRadius: 3, background: '#fff', color: 'var(--mt-text)',
+              }}
+              title="以某角色视角查看：看不到的实体会消失（战争迷雾）"
+            >
+              <option value="">全知（作者视角）</option>
+              {entities
+                .filter((e) => e.type === 'character')
+                .map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+            </select>
+            {observerId && observerVisibleSet && (
+              <span style={{ fontSize: 10, color: 'var(--mt-text-muted)' }}>
+                可见 {observerVisibleSet.size}/{entities.length}
+              </span>
+            )}
+          </div>
+
+          {/* Exploration mode controls (Maltego-style incremental investigation) */}
           <div
             style={{
               background: 'var(--mt-panel)', border: '1px solid var(--mt-border)',

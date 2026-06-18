@@ -23,6 +23,8 @@ export const api = {
     request<any>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProject: (id: string) =>
     request(`/projects/${id}`, { method: 'DELETE' }),
+  duplicateProject: (id: string) =>
+    request<any>(`/projects/${id}/duplicate`, { method: 'POST' }),
 
   // Entities
   listEntities: (projectId: string) => request<any[]>(`/projects/${projectId}/entities`),
@@ -51,9 +53,42 @@ export const api = {
     request<any>(`/projects/${projectId}/transforms/execute`, { method: 'POST', body: JSON.stringify(data) }),
 
   // Context (ST plugin)
-  getContext: (projectId: string, characters: string, scene?: string) => {
+  getContext: (projectId: string, characters: string, scene?: string, observer?: string) => {
     const params = new URLSearchParams({ characters });
     if (scene) params.set('scene', scene);
+    if (observer) params.set('observer', observer);
     return request<any>(`/projects/${projectId}/entities/context?${params}`);
   },
+
+  // Simulations (P1)
+  createSimulation: (projectId: string, data: { name?: string; driver_mode?: string; config?: any }) =>
+    request<any>(`/projects/${projectId}/simulations`, { method: 'POST', body: JSON.stringify(data) }),
+  listSimulations: (projectId: string) =>
+    request<any[]>(`/projects/${projectId}/simulations`),
+  getSimulation: (projectId: string, simId: string) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}`),
+  stepSimulation: (projectId: string, simId: string) =>
+    request<any>(`/projects/${projectId}/simulations/${simId}/step`, { method: 'POST' }),
+  getTicks: (projectId: string, simId: string, from?: number, to?: number) => {
+    const params = new URLSearchParams();
+    if (from != null) params.set('from', String(from));
+    if (to != null) params.set('to', String(to));
+    const qs = params.toString();
+    return request<any[]>(`/projects/${projectId}/simulations/${simId}/ticks${qs ? `?${qs}` : ''}`);
+  },
+  getMemory: (projectId: string, simId: string, entityId: string) =>
+    request<any[]>(`/projects/${projectId}/simulations/${simId}/memory?entity=${entityId}`),
+
+  // World Book (P3)
+  listWorldEntries: (projectId: string) =>
+    request<any[]>(`/projects/${projectId}/world-entries`),
+  createWorldEntry: (projectId: string, data: {
+    title?: string; content?: string; scope?: string;
+    entity_ids?: string[]; keys?: string[]; priority?: number; enabled?: number; properties?: any;
+  }) =>
+    request<any>(`/projects/${projectId}/world-entries`, { method: 'POST', body: JSON.stringify(data) }),
+  updateWorldEntry: (projectId: string, entryId: string, data: any) =>
+    request<any>(`/projects/${projectId}/world-entries/${entryId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteWorldEntry: (projectId: string, entryId: string) =>
+    request(`/projects/${projectId}/world-entries/${entryId}`, { method: 'DELETE' }),
 };

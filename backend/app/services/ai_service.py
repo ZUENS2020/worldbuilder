@@ -207,6 +207,230 @@ async def ai_detect_conflicts(
         return [{"type": "ai_error", "description": str(e), "severity": "low", "suggestion": ""}]
 
 
+# ── Simulation: Actor / Oracle / Memory ─────────────────────────
+
+async def ai_act(
+    scene_context: str,
+    participants: list[str],
+    memory_blocks: dict[str, str],
+    *,
+    nudges: dict[str, str] | None = None,
+    config: dict | None = None,
+    temperature: float = 0.8,
+) -> dict:
+    """Actor pass: roleplay one encounter between `participants` and produce a
+    short narrative + each actor's intents. In P1 this is full-knowledge
+    (scene_context is the omniscient view); belief-filtered views arrive in P4.
+
+    Returns {"narrative": str, "intents": [{"actor": name, "summary": str}]}.
+    """
+    mem_text = ""
+    for name in participants:
+        block = (memory_blocks or {}).get(name, "").strip()
+        if block:
+            mem_text += f"\n—— {name} 的记忆 ——\n{block}\n"
+    nudge_text = ""
+    for name in participants:
+        imp = (nudges or {}).get(name, "").strip()
+        if imp:
+            nudge_text += f"\n（{name} 心中忽然升起一个模糊的预感：{imp}）\n"
+
+    prompt = f"""你是一个关系演化模拟器的「演员」。下面是一次相遇场景的世界背景与参与者记忆，请生成这次互动。
+
+【世界背景】
+{scene_context or '（无额外背景）'}
+
+【参与者】{("、".join(participants))}
+{mem_text or ''}{nudge_text or ''}
+
+请演绎本次相遇：参与者之间发生了什么互动（对话/行动/情绪变化）。然后给出每个参与者在这次互动中的「意图」——他想改变的关系或自身状态（例如想拉近/疏远与某人的关系、产生新的目标或情绪）。
+
+只返回 JSON：
+{{
+  "narrative": "一段简洁的第三人称叙事，120字以内",
+  "intents": [
+    {{"actor": "参与者名", "summary": "他这次互动想达成/改变什么（一句话）"}}
+  ]
+}}"""
+    messages = [
+        {"role": "system", "content": "你是关系演化模拟器的演员，擅长把人物动机演绎成具体互动。只返回JSON。"},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        result = await call_ai(messages, config=config, temperature=temperature, max_tokens=1024)
+        parsed = json.loads(_strip_json(result))
+        return {
+            "narrative": parsed.get("narrative", "").strip(),
+            "intents": parsed.get("intents", []),
+        }
+    except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+        return {"narrative": "", "intents": [], "error": str(e)}
+
+
+async def ai_adjudicate(
+    tick_scenes: list[dict],
+    entity_catalog: list[dict],
+    *,
+    allow_new_entities: bool = False,
+    config: dict | None = None,
+    temperature: float = 0.4,
+) -> dict:
+    """Oracle pass: take ALL of this tick's narratives + intents at once and
+    resolve them into ONE consistent set of canonical mutations (conflict
+    strategy = oracle_merge). Mutations reference entities by name.
+
+    Returns {"mutations": [...], "new_entities": [...]}.
+    Mutation ops:
+      - update_relation: {op, source, target, type?, weight_delta?, weight?, description?}
+      - create_relation: {op, source, target, type, weight, description?}
+      - update_entity:   {op, entity, properties:{mood?,goal?,...}}
+      - create_entity:   {op, name, type, properties}   (only if allow_new_entities)
+    """
+    scenes_text = ""
+    for i, s in enumerate(tick_scenes, 1):
+        parts = "、".join(s.get("participants", []))
+        scenes_text += f"\n场景{i}（{parts}）：{s.get('narrative', '')}\n"
+        for it in s.get("intents", []):
+            scenes_text += f"  · {it.get('actor', '?')} 意图：{it.get('summary', '')}\n"
+
+    catalog_text = "、".join(
+        f"{e['name']}({e.get('type','?')})" for e in entity_catalog
+    )
+
+    new_entity_rule = (
+        '允许创造新实体：若叙事中出现全新的人物/地点/物品/事件，用 create_entity 产出，'
+        '由你负责命名（不得与已有实体重名）与定类型。'
+        if allow_new_entities else
+        '不允许创造新实体：只能在已有实体之间产生变化。'
+    )
+
+    prompt = f"""你是关系演化模拟器的「全知裁决者」(Oracle)。本 tick 发生了若干场相遇，请把它们整体解算成「一套」无矛盾的世界变更（canonical mutations）。
+
+【已有实体】{catalog_text}
+
+【本 tick 发生的场景与意图】
+{scenes_text}
+
+裁决规则：
+- 把所有意图作为整体考虑，同一对关系的矛盾意图由你按合理性/当前关系强度/双方处境统一裁决，最终只产出一套不重复、不冲突的变更。
+- 关系强度 weight 取值 0~1。weight_delta 是增量（可正可负，幅度建议 ±0.05~0.2）。
+- 内部状态（mood 情绪 / goal 目标）写进 update_entity 的 properties。
+- {new_entity_rule}
+- 信息可见度落地：若某意图涉及「谁能知道某条信息」（揭示秘密给特定人、向某些人隐瞒某事），用 set_prop_visibility 把它落成确定名单——level 用 entities 时，entities 必须是**具体实体名**（你把「盟友」等群体展开成具体的人），private 表示仅自己可见，public 表示公开。
+- 没有实质变化的场景可以不产出 mutation。
+
+只返回 JSON：
+{{
+  "mutations": [
+    {{"op": "update_relation", "source": "名", "target": "名", "weight_delta": 0.1, "type": "可选新类型", "description": "可选"}},
+    {{"op": "create_relation", "source": "名", "target": "名", "type": "ally", "weight": 0.6, "description": "可选"}},
+    {{"op": "update_entity", "entity": "名", "properties": {{"mood": "喜悦", "goal": "..."}}}},
+    {{"op": "set_prop_visibility", "entity": "信息所属者名", "key": "secret", "level": "entities", "entities": ["可知者1", "可知者2"]}}
+  ],
+  "new_entities": [
+    {{"op": "create_entity", "name": "新名", "type": "character", "properties": {{}}}}
+  ]
+}}
+
+关系类型可选：ally, enemy, lover, family, rival, mentor, subordinate, member_of, located_at, participated, caused, followed_by, holds, owns, custom。"""
+    messages = [
+        {"role": "system", "content": "你是关系演化模拟器的全知裁决者，把多方意图解算成一套无矛盾的世界变更。只返回JSON。"},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        result = await call_ai(messages, config=config, temperature=temperature, max_tokens=2048)
+        parsed = json.loads(_strip_json(result))
+        return {
+            "mutations": parsed.get("mutations", []),
+            "new_entities": parsed.get("new_entities", []) if allow_new_entities else [],
+        }
+    except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+        return {"mutations": [], "new_entities": [], "error": str(e)}
+
+
+async def ai_resolve_visibility(
+    intent: dict,
+    entity_catalog: list[dict],
+    *,
+    subject_name: str | None = None,
+    config: dict | None = None,
+    temperature: float = 0.2,
+) -> dict:
+    """Oracle visibility-landing pass (plan decision 10b).
+
+    An Actor may form a fuzzy disclosure/concealment intent — e.g. "let only my
+    allies know my real plan", "hide my wound from enemies". This resolves that
+    vague intent into a concrete, materialized whitelist against the canonical
+    world: which property key it concerns, the (optional) revealed content, and
+    the exact list of entity names allowed to see it.
+
+    Returns {"prop_key": str|None, "content": str|None, "matched_entities": [name,...]}.
+    Returning an empty/identity result means "no visibility change".
+    """
+    catalog_text = "、".join(
+        f"{e['name']}({e.get('type','?')})" for e in entity_catalog
+    )
+    intent_text = intent.get("summary") or intent.get("content") or str(intent)
+    subject_line = f"\n【信息所属者】{subject_name}" if subject_name else ""
+
+    prompt = f"""你是关系演化模拟器的「全知可见度落地器」(Oracle)。某角色产生了一个关于「谁能知道某条信息」的模糊意图，请把它落地成一份**确定的可见名单**。
+{subject_line}
+【意图】{intent_text}
+
+【世界中的实体】{catalog_text}
+
+落地规则：
+- 判断这条意图涉及信息所属者的哪一条属性（prop_key，如 goal/secret/wound/plan 等；若无明确属性则给一个贴切的英文键名）。
+- 如果意图是「揭示/告知」某内容，给出 content（揭示出去的具体文本）；如果只是「隐藏」，content 留空。
+- 从【世界中的实体】里挑出**确切应当能看到这条信息的实体名单**（matched_entities，用实体原名）。隐藏类意图则给出仍可见的少数人（通常是自己/盟友），其余人默认看不到。
+- 名单要具体到实体名，不要用「盟友」这种群体词——你来把群体展开成具体的人。
+
+只返回 JSON：
+{{"prop_key": "goal", "content": "可选揭示内容或留空", "matched_entities": ["名1", "名2"]}}"""
+    messages = [
+        {"role": "system", "content": "你是全知可见度落地器，把模糊的信息披露意图解算成确定的可见实体名单。只返回JSON。"},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        result = await call_ai(messages, config=config, temperature=temperature, max_tokens=512)
+        parsed = json.loads(_strip_json(result))
+        return {
+            "prop_key": parsed.get("prop_key"),
+            "content": parsed.get("content") or None,
+            "matched_entities": parsed.get("matched_entities", []) or [],
+        }
+    except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
+        return {"prop_key": None, "content": None, "matched_entities": [], "error": str(e)}
+
+
+async def ai_summarize_memory(
+    prior_summary: str,
+    episodics_text: str,
+    *,
+    config: dict | None = None,
+) -> str:
+    """Memory compactor: fold a batch of old episodics (plus any prior summary)
+    into one concise long-term summary. Returns plain text."""
+    prompt = f"""把下面这个角色的旧经历压缩成一段简洁的长期记忆摘要，保留关键的人物、关系变化与情绪转折，去掉琐碎细节。
+
+【已有摘要】
+{prior_summary or '（无）'}
+
+【待压缩的经历】
+{episodics_text}
+
+只返回摘要正文（150字以内），不要任何解释或JSON。"""
+    messages = [
+        {"role": "system", "content": "你是记忆压缩器，把经历流水浓缩成要点摘要。只返回摘要正文。"},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        return (await call_ai(messages, config=config, temperature=0.3, max_tokens=512)).strip()
+    except httpx.HTTPError as e:
+        # On failure, fall back to a mechanical concatenation so nothing is lost.
+        return (prior_summary + "\n" + episodics_text).strip()[:500]
+
+
 async def ai_generate_backstory(
     entity_name: str,
     entity_type: str,

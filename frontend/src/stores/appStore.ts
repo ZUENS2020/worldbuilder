@@ -113,8 +113,8 @@ interface AppState {
   setDropRequest: (d: { id: string; x: number; y: number } | null) => void;
 
   // View mode
-  viewMode: 'relations' | 'events';
-  setViewMode: (v: 'relations' | 'events') => void;
+  viewMode: 'relations' | 'events' | 'simulator';
+  setViewMode: (v: 'relations' | 'events' | 'simulator') => void;
 
   // Settings dialog
   settingsOpen: boolean;

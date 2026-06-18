@@ -8,6 +8,7 @@ Writes are dual-written (SQLite + memory).
 from collections import defaultdict, deque
 from typing import Optional
 from app.models.models import Entity, Relation
+from app.graph import visibility, worldbook
 
 
 # ── Display-label maps (mirror frontend types/index.ts) ─────────
@@ -36,7 +37,8 @@ PROPERTY_KEY_LABELS = {
     "weakness": "弱点", "motto": "口头禅", "outfit": "服装", "weapon": "武器",
 }
 # Property keys that are redundant with the entity name / internal — skip.
-_SKIP_PROP_KEYS = {"label", "name", "_property_order"}
+# Includes visibility meta-fields (_visibility, _prop_visibility) from visibility.py.
+_SKIP_PROP_KEYS = {"label", "name", "_property_order"} | visibility.VISIBILITY_META_KEYS
 
 
 def _format_props(props: dict) -> list[str]:
@@ -165,9 +167,16 @@ class GraphEngine:
             "hop_map": visited,
         }
 
-    def _entity_oneliner(self, entity: Entity) -> str:
-        """One-line summary for a neighbor (description or personality, truncated)."""
-        props = entity.properties or {}
+    def _entity_oneliner(self, entity: Entity, observer_id: Optional[str] = None) -> str:
+        """One-line summary for a neighbor (description or personality, truncated).
+
+        When ``observer_id`` is given, the blurb is drawn only from properties
+        that observer is allowed to read (visibility model).
+        """
+        props = (
+            visibility.filter_properties(entity, observer_id, self)
+            if observer_id is not None else (entity.properties or {})
+        )
         blurb = props.get("description") or props.get("desc") or props.get("personality") or ""
         if isinstance(blurb, (list, tuple)):
             blurb = "、".join(str(v) for v in blurb)
@@ -184,6 +193,10 @@ class GraphEngine:
         scene: str = None,
         *,
         context_hop: int = 2,
+        observer_id: Optional[str] = None,
+        tag_members: Optional[dict] = None,
+        world_entries: Optional[list] = None,
+        worldbook_budget: int = 1200,
     ) -> dict:
         """Build rich world-context text for LLM injection.
 
@@ -191,31 +204,58 @@ class GraphEngine:
         the relation network around it (selected ↔ selected, and N-hop
         neighbors). Neighbors are listed as name + one-line blurb only, to keep
         the prompt focused. Returns {system_injection, active_warnings, token_count}.
+
+        ``observer_id=None`` builds the omniscient (author/Oracle) context.
+        ``observer_id=A`` filters every section through the visibility model:
+        entities A cannot see are omitted, and per-property visibility is applied
+        (see app/graph/visibility.py). ``tag_members`` optionally supplies
+        tag-based group membership ({group_id: set(entity_ids)}).
         """
         hop = max(1, min(5, int(context_hop)))
         selected = [eid for eid in entity_ids if eid in self.entities]
         selected_set = set(selected)
         warnings = []
 
+        def _visible(eid: str) -> bool:
+            ent = self.entities.get(eid)
+            return bool(ent) and visibility.entity_visible_to(ent, observer_id, self, tag_members)
+
         # Gather all relations touching the selected entities (within project).
         rels_by_id = {}
         neighbor_ids = set()
         for eid in selected:
+            if not _visible(eid):
+                continue
             result = self.get_neighbors(eid, hop=hop, project_id=project_id)
             for r in result["relations"]:
-                rels_by_id[r.id] = r
+                if visibility.relation_visible_to(r, observer_id, self, tag_members):
+                    rels_by_id[r.id] = r
             for nid, h in result["hop_map"].items():
-                if nid not in selected_set:
+                if nid not in selected_set and _visible(nid):
                     neighbor_ids.add(nid)
 
         lines = []
 
-        # ── Section 1: selected entities with full properties ──
+        # ── Section 0: World Book (graph-anchored lore, P3) ──
+        if world_entries:
+            in_scene = {eid for eid in selected if _visible(eid)} | neighbor_ids
+            wb = worldbook.build_injection(
+                world_entries, in_scene,
+                observer_id=observer_id, token_budget=worldbook_budget,
+            )
+            if wb:
+                lines.append(wb)
+                lines.append("")
+
+        # ── Section 1: selected entities with (visibility-filtered) properties ──
         for eid in selected:
             entity = self.entities[eid]
+            if not _visible(eid):
+                continue
             type_label = ENTITY_TYPE_LABELS.get(entity.type, entity.type)
             lines.append(f"【{entity.name}（{type_label}）】")
-            prop_lines = _format_props(entity.properties or {})
+            props = visibility.filter_properties(entity, observer_id, self)
+            prop_lines = _format_props(props)
             if prop_lines:
                 lines.extend(prop_lines)
             lines.append("")  # blank line between blocks
@@ -248,7 +288,7 @@ class GraphEngine:
 
         # ── Section 3: related neighbors (name + blurb only) ──
         neighbor_lines = [
-            self._entity_oneliner(self.entities[nid])
+            self._entity_oneliner(self.entities[nid], observer_id=observer_id)
             for nid in neighbor_ids if nid in self.entities
         ]
         if neighbor_lines:

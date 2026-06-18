@@ -1,7 +1,13 @@
 /** Internal key storing custom property display order. */
 export const PROPERTY_ORDER_KEY = '_property_order';
 
-export const RESERVED_ENTITY_PROPERTY_KEYS = new Set(['name', 'label', PROPERTY_ORDER_KEY]);
+/** Visibility meta-fields (mirror backend app/graph/visibility.py). */
+export const VISIBILITY_KEY = '_visibility';
+export const PROP_VISIBILITY_KEY = '_prop_visibility';
+
+export const RESERVED_ENTITY_PROPERTY_KEYS = new Set([
+  'name', 'label', PROPERTY_ORDER_KEY, VISIBILITY_KEY, PROP_VISIBILITY_KEY,
+]);
 
 export function getOrderedPropertyEntries(
   properties: Record<string, unknown> | undefined,

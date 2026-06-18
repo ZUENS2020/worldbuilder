@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, async_session
 from app.models.models import Entity, Relation, Project
 from app.graph.engine import graph_engine
-from app.routers import projects, entities, relations, transforms
+from app.routers import projects, entities, relations, transforms, simulations, world_entries
 from sqlalchemy import select
 
 
@@ -56,6 +56,8 @@ app.include_router(projects.router)
 app.include_router(entities.router)
 app.include_router(relations.router)
 app.include_router(transforms.router)
+app.include_router(simulations.router)
+app.include_router(world_entries.router)
 
 
 @app.get("/api/health")

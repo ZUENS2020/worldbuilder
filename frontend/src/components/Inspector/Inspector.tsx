@@ -6,6 +6,7 @@ import TextEditorModal from '../common/TextEditorModal';
 import Markdown from '../common/Markdown';
 import TransformPanel from '../Transform/TransformPanel';
 import EntityPropertyList from './EntityPropertyList';
+import EntityVisibilityControl from './EntityVisibilityControl';
 import { buildPropertiesWithOrder, getOrderedPropertyEntries } from '../../utils/propertyOrder';
 import { ImeInput } from '../common/ImeInput';
 
@@ -17,7 +18,7 @@ export default function Inspector() {
     selectedEntityId, selectedEntityIds, setSelectedEntities, entities, relations, updateEntity, removeEntity,
     executeTransform, addRelation, removeRelation, focusOnEntity,
     customRelationTypes, addCustomRelationType, removeCustomRelationType,
-    inspectorTab, setInspectorTab,
+    inspectorTab, setInspectorTab, tags,
   } = useAppStore();
 
   const [aiLoading, setAiLoading] = useState<string | null>(null);
@@ -283,6 +284,15 @@ export default function Inspector() {
           )}
         </div>
 
+        <EntityVisibilityControl
+          entity={entity}
+          entities={entities}
+          tags={tags}
+          updateEntity={updateEntity}
+          sectionLabel={sectionLabel}
+          fieldStyle={fieldStyle}
+        />
+
         <EntityPropertyList
           entityId={entity.id}
           properties={entity.properties || {}}
@@ -293,6 +303,7 @@ export default function Inspector() {
           fieldStyle={fieldStyle}
           sectionLabel={sectionLabel}
           onAdd={handleAddProperty}
+          allEntities={otherEntities.map((e) => ({ id: e.id, name: e.name }))}
         />
 
         {/* Relations */}

@@ -45,6 +45,19 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
     }
   };
 
+  const handleDuplicate = async (id: string) => {
+    setCreating(true);
+    try {
+      const copy = await api.duplicateProject(id);
+      await useAppStore.getState().loadProjects();
+      await switchProject(copy.id);
+      onClose();
+    } catch (e) {
+      console.error('Failed to duplicate project:', e);
+    }
+    setCreating(false);
+  };
+
   // Position the popup above the status bar anchor
   const style: React.CSSProperties = anchorRect
     ? {
@@ -125,6 +138,15 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
                     {p.updated_at ? new Date(p.updated_at).toLocaleDateString('zh-CN') : ''}
                   </div>
                 </div>
+                <span
+                  onClick={(e) => { e.stopPropagation(); handleDuplicate(p.id); }}
+                  style={{ fontSize: 11, color: '#ccc', cursor: 'pointer', padding: '2px 4px' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = 'var(--mt-accent)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#ccc'; }}
+                  title="复制为沙盒副本"
+                >
+                  ⧉
+                </span>
                 {isCurrent && (
                   <span style={{ fontSize: 10, color: 'var(--mt-accent)', fontWeight: 600 }}>当前</span>
                 )}

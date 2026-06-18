@@ -8,9 +8,11 @@ import Palette from './components/Palette/Palette';
 import Inspector from './components/Inspector/Inspector';
 import Timeline from './components/Timeline/Timeline';
 import EventGraph from './components/EventGraph/EventGraph';
+import SimulatorPanel from './components/Simulator/SimulatorPanel';
 import AISuggestionReview from './components/AIReview/AISuggestionReview';
 import SettingsDialog from './components/Settings/SettingsDialog';
 import ProjectSwitcher from './components/ProjectSwitcher/ProjectSwitcher';
+import WorldBookDialog from './components/WorldBook/WorldBookDialog';
 
 function App() {
   const {
@@ -23,6 +25,7 @@ function App() {
   const [creating, setCreating] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
+  const [worldBookOpen, setWorldBookOpen] = useState(false);
   const statusBarRef = useRef<HTMLSpanElement>(null);
   const [inspectorWidth, setInspectorWidth] = useState(() => {
     const saved = Number(localStorage.getItem('wb.inspectorWidth'));
@@ -175,6 +178,7 @@ function App() {
   const viewConfig: Record<string, { icon: string; label: string }> = {
     relations: { icon: '🕸️', label: '关系图' },
     events: { icon: '⚡', label: '事件图' },
+    simulator: { icon: '🎭', label: '模拟器' },
   };
   const vc = viewConfig[viewMode] || viewConfig.relations;
 
@@ -191,7 +195,7 @@ function App() {
               <div className="mt-panel-title" style={{ justifyContent: 'space-between' }}>
                 <span>{vc.icon} {vc.label}</span>
                 <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                  {(['relations', 'events'] as const).map((vm) => (
+                  {(['relations', 'events', 'simulator'] as const).map((vm) => (
                     <button
                       key={vm}
                       className={`mt-btn${viewMode === vm ? ' active' : ''}`}
@@ -202,6 +206,14 @@ function App() {
                     </button>
                   ))}
                   <span style={{ width: 8 }} />
+                  <button
+                    className="mt-btn"
+                    style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
+                    onClick={() => setWorldBookOpen(true)}
+                    title="世界书 World Book"
+                  >
+                    📖
+                  </button>
                   <button
                     className={`mt-btn${showTimeline ? ' active' : ''}`}
                     style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
@@ -221,6 +233,7 @@ function App() {
               <div className="mt-panel-body" style={{ overflow: 'hidden', position: 'relative' }}>
                 {viewMode === 'relations' && <Canvas />}
                 {viewMode === 'events' && <EventGraph />}
+                {viewMode === 'simulator' && <SimulatorPanel />}
               </div>
             </div>
             {showTimeline && <Timeline />}
@@ -271,6 +284,7 @@ function App() {
         onClose={() => setProjectSwitcherOpen(false)}
         anchorRect={statusBarRef.current?.getBoundingClientRect()}
       />
+      <WorldBookDialog open={worldBookOpen} onClose={() => setWorldBookOpen(false)} />
     </ReactFlowProvider>
   );
 }

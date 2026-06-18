@@ -6,7 +6,7 @@ from sqlalchemy import select
 import uuid
 
 from app.database import get_db
-from app.models.models import Entity, Project
+from app.models.models import Entity, Project, WorldEntry
 from app.schemas import EntityCreate, EntityUpdate, EntityOut, NeighborResult, GraphContext
 from app.graph.engine import graph_engine
 from app.graph.hop_settings import resolve_graph_hops
@@ -54,26 +54,55 @@ async def get_context(
     characters: str = Query(..., description="Comma-separated character names or IDs"),
     scene: str = Query(None),
     hop: int = Query(None, ge=1, le=5, description="Override context hop depth (default from project settings)"),
+    observer: str = Query(None, description="Observer entity name or ID; omit for the omniscient view"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get graph context for ST plugin injection."""
+    """Get graph context for ST plugin injection.
+
+    When ``observer`` is supplied, the context is filtered through that agent's
+    visibility (fog of war); otherwise it is the omniscient author view.
+    """
     project = await db.get(Project, project_id)
     hops = resolve_graph_hops(project.settings if project else {})
     context_hop = hop if hop is not None else hops["context_injection"]
 
+    def _resolve(token: str):
+        token = (token or "").strip()
+        if not token:
+            return None
+        if token in graph_engine.entities:
+            return token
+        for eid, e in graph_engine.entities.items():
+            if e.name == token and e.project_id == project_id:
+                return eid
+        return None
+
     char_list = [c.strip() for c in characters.split(",")]
-    entity_ids = []
-    for c in char_list:
-        if c in graph_engine.entities:
-            entity_ids.append(c)
-        else:
-            for eid, e in graph_engine.entities.items():
-                if e.name == c and e.project_id == project_id:
-                    entity_ids.append(eid)
-                    break
+    entity_ids = [eid for c in char_list if (eid := _resolve(c))]
+
+    observer_id = _resolve(observer) if observer else None
+
+    # Tag-based group membership lives in Project.settings.tags.
+    tag_members = None
+    settings_tags = (project.settings or {}).get("tags") if project else None
+    if isinstance(settings_tags, list):
+        tag_members = {
+            t["id"]: set(t.get("entityIds") or [])
+            for t in settings_tags if isinstance(t, dict) and t.get("id")
+        }
+
+    # Load enabled World Book entries for graph-anchored injection (P3).
+    we_result = await db.execute(
+        select(WorldEntry).where(
+            WorldEntry.project_id == project_id, WorldEntry.enabled == 1
+        )
+    )
+    world_entries = we_result.scalars().all()
 
     result = graph_engine.get_context(
         entity_ids, project_id=project_id, scene=scene, context_hop=context_hop,
+        observer_id=observer_id, tag_members=tag_members,
+        world_entries=world_entries,
     )
     return GraphContext(**result)
 
