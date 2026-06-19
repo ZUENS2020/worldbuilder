@@ -29,6 +29,7 @@ interface SimState {
   isPlaying: boolean;      // background loop active (P5)
   scrubTick: number | null; // timeline scrub position; null = live/latest
   error: string | null;
+  pauseNotice: { reason: string; tick: number } | null; // 落幕提示 (quiescent / max_ticks)
   writebackItems: any[];
   writebackPreview: any | null;
 
@@ -96,6 +97,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   isPlaying: false,
   scrubTick: null,
   error: null,
+  pauseNotice: null,
   writebackItems: [],
   writebackPreview: null,
 
@@ -148,7 +150,7 @@ export const useSimStore = create<SimState>((set, get) => ({
     const projectId = useAppStore.getState().project?.id;
     const sim = get().sim;
     if (!projectId || !sim || get().stepping || get().isPlaying || sim.status === 'running') return;
-    set({ stepping: true, error: null });
+    set({ stepping: true, error: null, pauseNotice: null });
     try {
       const res = await api.stepSimulation(projectId, sim.id);
       set((s) => ({
@@ -169,7 +171,7 @@ export const useSimStore = create<SimState>((set, get) => ({
     const projectId = useAppStore.getState().project?.id;
     const sim = get().sim;
     if (!projectId || !sim || get().isPlaying) return;
-    set({ error: null, isPlaying: true, scrubTick: null });
+    set({ error: null, isPlaying: true, scrubTick: null, pauseNotice: null });
     // Subscribe before the loop starts so the first tick is not missed.
     get()._subscribe();
     try {
@@ -263,7 +265,10 @@ export const useSimStore = create<SimState>((set, get) => ({
         useAppStore.getState().loadProjectData(projectId);
       } else if (msg.type === 'paused') {
         _closeStream();
-        set({ isPlaying: false });
+        const notice = (msg.reason === 'quiescent' || msg.reason === 'max_ticks')
+          ? { reason: msg.reason as string, tick: Number(msg.tick ?? get().sim?.current_tick ?? 0) }
+          : null;
+        set({ isPlaying: false, pauseNotice: notice });
         const pid = useAppStore.getState().project?.id;
         const sid = get().sim?.id;
         if (pid && sid) {
@@ -283,7 +288,7 @@ export const useSimStore = create<SimState>((set, get) => ({
 
   reset: () => {
     _closeStream();
-    set({ sim: null, ticks: [], scrubTick: null, isPlaying: false, error: null, writebackItems: [], writebackPreview: null });
+    set({ sim: null, ticks: [], scrubTick: null, isPlaying: false, error: null, pauseNotice: null, writebackItems: [], writebackPreview: null });
   },
 
   loadWritebackQueue: async (status = 'pending') => {

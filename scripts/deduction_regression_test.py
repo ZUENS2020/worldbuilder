@@ -23,6 +23,9 @@ from app.services.simulation import (  # noqa: E402
     _event_dedupe_corpus,
     _norm_name,
     _register_pending_events,
+    _tick_made_progress,
+    _TENSION_FLOOR,
+    _SETTLED_GOAL_PREFIX,
 )
 from app.graph.engine import graph_engine  # noqa: E402
 from app.models.models import Entity, Relation  # noqa: E402
@@ -99,13 +102,99 @@ def test_scan_goal_conflicts():
                properties={"goal": "阻止甲上位"}, project_id=pid)
     graph_engine.add_entity(a)
     graph_engine.add_entity(b)
+    # Live tension (weight above floor) → a candidate is surfaced.
     rel = Relation(id="r1", source_id="ga", target_id="gb", type="enemy",
-                   weight=0.3, properties={}, project_id=pid)
+                   weight=0.7, properties={}, project_id=pid)
     graph_engine.add_relation(rel)
     out = _scan_goal_conflicts(pid)
     assert out and out[0].get("participants") == ["甲", "乙"]
     for eid in list(graph_engine.project_entities.get(pid, set())):
         graph_engine.remove_entity(eid)
+
+
+def test_scan_goal_conflicts_below_floor():
+    """A grudge that has cooled below the tension floor no longer seeds conflict."""
+    pid = "__test_goals_floor__"
+    for eid in list(graph_engine.project_entities.get(pid, set())):
+        graph_engine.remove_entity(eid)
+    a = Entity(id="fa", name="甲", type="character",
+               properties={"goal": "夺下主席席位"}, project_id=pid)
+    b = Entity(id="fb", name="乙", type="character",
+               properties={"goal": "阻止甲上位"}, project_id=pid)
+    graph_engine.add_entity(a)
+    graph_engine.add_entity(b)
+    rel = Relation(id="rf", source_id="fa", target_id="fb", type="enemy",
+                   weight=_TENSION_FLOOR - 0.1, properties={}, project_id=pid)
+    graph_engine.add_relation(rel)
+    assert _scan_goal_conflicts(pid) == []
+    for eid in list(graph_engine.project_entities.get(pid, set())):
+        graph_engine.remove_entity(eid)
+
+
+def test_settled_goal_not_reseeded():
+    """A participant whose goal is已了结 (achieved/defeated) is skipped — winners
+    don't keep fighting fights they've already won."""
+    pid = "__test_goals_settled__"
+    for eid in list(graph_engine.project_entities.get(pid, set())):
+        graph_engine.remove_entity(eid)
+    a = Entity(id="sa", name="甲", type="character",
+               properties={"goal": f"{_SETTLED_GOAL_PREFIX}夺下主席席位",
+                           "goal_status": "achieved"}, project_id=pid)
+    b = Entity(id="sb", name="乙", type="character",
+               properties={"goal": "阻止甲上位"}, project_id=pid)
+    graph_engine.add_entity(a)
+    graph_engine.add_entity(b)
+    rel = Relation(id="rs", source_id="sa", target_id="sb", type="enemy",
+                   weight=0.8, properties={}, project_id=pid)
+    graph_engine.add_relation(rel)
+    assert _scan_goal_conflicts(pid) == []
+    for eid in list(graph_engine.project_entities.get(pid, set())):
+        graph_engine.remove_entity(eid)
+
+
+def test_progress_detection():
+    """Real advance → progress; mere busywork (mood swing, belief sync, jitter) → not."""
+    # No-progress ticks
+    assert not _tick_made_progress([])
+    assert not _tick_made_progress([
+        {"op": "update_entity", "entity": "甲", "properties": {"mood": "焦虑"}},
+    ])
+    assert not _tick_made_progress([
+        {"op": "update_relation", "source": "甲", "target": "乙", "weight": 0.52,
+         "weight_delta": 0.02},
+    ])
+    # weight delta exactly at the floor is jitter, not progress.
+    assert not _tick_made_progress([
+        {"op": "update_relation", "source": "甲", "target": "乙", "weight": 0.55,
+         "weight_delta": 0.05},
+    ])
+    # Goal *text* churn (belief layer re-deriving the same maneuver) is the
+    # spinning signature — must NOT count as progress.
+    assert not _tick_made_progress([
+        {"op": "update_entity", "entity": "甲",
+         "properties": {"goal": "从乙口中套取路线，夺回信纸"}},
+        {"op": "update_entity", "entity": "乙",
+         "properties": {"goal": "蒙混过关，记住信纸特征"}},
+        {"op": "update_relation", "source": "甲", "target": "乙", "weight": 0.4,
+         "weight_delta": 0.05},
+    ])
+    # Progress ticks
+    assert _tick_made_progress([
+        {"op": "resolve_event", "name": "遗嘱宣读", "tick": 6, "outcome": "x"},
+    ])
+    assert _tick_made_progress([
+        {"op": "create_event", "name": "警方登岛", "tick": 7},
+    ])
+    assert _tick_made_progress([
+        {"op": "register_pending_event", "name": "新博弈"},
+    ])
+    assert _tick_made_progress([
+        {"op": "update_relation", "source": "甲", "target": "乙", "weight": 0.3,
+         "weight_delta": -0.25},
+    ])
+    assert _tick_made_progress([
+        {"op": "update_entity", "entity": "甲", "properties": {"status": "失势"}},
+    ])
 
 
 def test_preset_event_has_no_owner():
@@ -199,6 +288,9 @@ def main() -> int:
     test_autonomous_no_sequence_gate()
     test_mechanical_resolve_fallback()
     test_scan_goal_conflicts()
+    test_scan_goal_conflicts_below_floor()
+    test_settled_goal_not_reseeded()
+    test_progress_detection()
     test_preset_event_has_no_owner()
     test_norm_name_folds_width()
     test_promote_dormant_event_in_place()

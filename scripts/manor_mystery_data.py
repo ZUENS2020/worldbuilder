@@ -18,6 +18,7 @@
   - nudge_strategy: weighted
   - generate_events: True
   - max_encounters_per_tick: 4
+  - stability_window: 4（世界入稳态即自动落幕暂停）, max_ticks: 60（兜底）
 
 导入:
   cd scripts && python3 import_world.py manor_mystery_data
@@ -49,7 +50,7 @@ SIM_CONFIG = {
     "scheduler_strategy": "weighted",
     "scheduler_mix_conflict": True,
     "generate_events": True,
-    "event_min_significance": 0.45,
+    "event_min_significance": 0.6,
     "event_dedupe": True,
     "tick_interval_sec": 8,
     "nudge_strategy": "weighted",
@@ -58,6 +59,9 @@ SIM_CONFIG = {
     "nudge_intensity": 0.6,
     # 推演: outcomes from world state; pending_max_age is robustness only.
     "pending_max_age": 10,
+    # 落幕: 世界进入稳态(连续 N tick 无实质进展)即自动暂停;max_ticks 兜底。
+    "stability_window": 4,
+    "max_ticks": 60,
 }
 
 ENTITIES: dict[str, dict] = {

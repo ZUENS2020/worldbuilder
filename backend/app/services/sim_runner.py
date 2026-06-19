@@ -118,11 +118,14 @@ async def _loop(sim_id: str, project_id: str) -> None:
                 simtick = await guarded_run_tick(session, sim)
                 await _broadcast(sim_id, {"type": "tick", "tick": _serialize_tick(simtick)})
 
-                mutation_count = len(simtick.mutations or [])
+                # Quiescence is about *progress*, not motion: anti-drought machinery
+                # keeps mutations flowing, so a tick with no real advance is what
+                # signals the world has settled into a new equilibrium.
+                made_progress = bool((simtick.metrics or {}).get("progress"))
                 if stability_window:
-                    r.stable_streak = r.stable_streak + 1 if mutation_count == 0 else 0
+                    r.stable_streak = 0 if made_progress else r.stable_streak + 1
                     if r.stable_streak >= stability_window:
-                        await _pause(session, sim, reason="stability_window")
+                        await _pause(session, sim, reason="quiescent")
                         break
 
             await asyncio.sleep(interval)

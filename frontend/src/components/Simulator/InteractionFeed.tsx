@@ -107,6 +107,7 @@ export default function InteractionFeed() {
   const ticks = useSimStore((s) => s.ticks);
   const stepping = useSimStore((s) => s.stepping);
   const scrubTick = useSimStore((s) => s.scrubTick);
+  const pauseNotice = useSimStore((s) => s.pauseNotice);
   const lastTickId = ticks[ticks.length - 1]?.id;
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -136,6 +137,18 @@ export default function InteractionFeed() {
       {stepping && (
         <div style={{ padding: '12px', textAlign: 'center', color: 'var(--mt-text-muted)', fontSize: 12 }}>
           ⏳ 角色们正在互动，世界正在演化…
+        </div>
+      )}
+      {pauseNotice && !stepping && (
+        <div style={{
+          margin: '14px 12px', padding: '12px 14px', textAlign: 'center',
+          border: '1px solid var(--mt-border)', borderRadius: 6,
+          background: 'var(--mt-window)', color: 'var(--mt-text-muted)', fontSize: 12.5,
+        }}>
+          <div style={{ fontWeight: 700, color: 'var(--mt-text)', marginBottom: 2 }}>🎬 本幕落幕</div>
+          {pauseNotice.reason === 'quiescent'
+            ? `世界已入稳态（tick ${pauseNotice.tick}）—— 各方目标尘埃落定，无新的实质张力。继续推进可注入新变量。`
+            : `已抵达预设回合上限（tick ${pauseNotice.tick}）。继续推进可解除上限。`}
         </div>
       )}
       <div ref={endRef} />

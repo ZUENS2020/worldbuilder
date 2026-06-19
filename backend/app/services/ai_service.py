@@ -474,7 +474,7 @@ async def ai_filter_event_duplicates(
         cand_lines.append(f"  {i}. [{kind}] {name} — {detail[:120]}")
 
     exist_lines: list[str] = []
-    for e in existing[:40]:
+    for e in existing[:60]:
         st = e.get("status") or "?"
         name = (e.get("name") or "").strip()
         detail = (e.get("summary") or e.get("stakes") or e.get("description") or "").strip()
@@ -492,6 +492,8 @@ async def ai_filter_event_duplicates(
 判定为不重复（保留）：
 - 明确新阶段、新信息、新后果（如「警方登岛」「人质被带走」「新证据来源被确认」）
 - 同一主线上的**下一阶段**（前一事件已结算且本候选推进到不同结果）
+
+去重从严：当候选与已有事件涉及**同一批当事人、同一主题**，且看不出明确的新事实/新结果时，一律判为重复剔除。"X引开Y""再次逼问""又一次对峙"这类同义重复必须折叠到首个事件，不要逐次结晶。只有确实推进到新结果时才保留。
 
 【已有事件】
 {chr(10).join(exist_lines)}
@@ -713,6 +715,10 @@ async def ai_resolve_event(
 - outcome：一句**事实记录**，点明发生了什么、各方结局如何（将作为既定事实写入世界与记忆）。
 - {consequence_rule}
 - 结算后当事人面对的是余波，不应仍停在事件前夜。
+- participant_goal_status：判断每个参与者「围绕此事的目标」是否随结算了结——
+  `achieved`（已达成）/ `defeated`（已落空、不可能再实现）/ `ongoing`（尚未了结，仍会继续追求）。
+  赢家与认输者多为 achieved/defeated；只有目标确实悬而未决的才是 ongoing。
+  已了结者将停止追逐此目标，不要让其永远纠缠同一场博弈。
 
 只返回 JSON：
 {{
@@ -720,7 +726,8 @@ async def ai_resolve_event(
   "consequences": [
     {{"op": "update_entity", "entity": "名", "properties": {{"goal": "...", "mood": "..."}}}},
     {{"op": "update_relation", "source": "名", "target": "名", "weight_delta": -0.2, "type": "可选新类型"}}
-  ]
+  ],
+  "participant_goal_status": {{"参与者名": "achieved|defeated|ongoing"}}
 }}
 
 关系类型可选：ally, enemy, lover, family, rival, mentor, subordinate, member_of, located_at, participated, caused, followed_by, holds, owns, custom。"""
@@ -731,12 +738,16 @@ async def ai_resolve_event(
     try:
         result = await call_ai(messages, config=config, temperature=temperature, max_tokens=1024)
         parsed = json.loads(_strip_json(result))
+        goal_status = parsed.get("participant_goal_status")
+        if not isinstance(goal_status, dict):
+            goal_status = {}
         return {
             "outcome": (parsed.get("outcome") or "").strip(),
             "consequences": parsed.get("consequences") or [],
+            "participant_goal_status": goal_status,
         }
     except (json.JSONDecodeError, KeyError, httpx.HTTPError) as e:
-        return {"outcome": "", "consequences": [], "error": str(e)}
+        return {"outcome": "", "consequences": [], "participant_goal_status": {}, "error": str(e)}
 
 
 async def ai_summarize_memory(

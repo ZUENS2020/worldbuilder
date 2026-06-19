@@ -37,14 +37,14 @@ DEFAULT_CONFIG = {
     "memory_recent_k": 8,
     "memory_compact_threshold": 12,
     "generate_events": True,          # Oracle crystallizes significant happenings into event nodes
-    "event_min_significance": 0.5,    # only events at/above this significance become nodes
+    "event_min_significance": 0.6,    # only events at/above this significance become nodes
     "event_dedupe": True,             # LLM semantic dedupe against recent events/pending
     # 推演 (causal forward-deduction of pending events)
     "pending_max_age": 8,             # force-resolve a pending event this many ticks after registration (0 = off)
     # P5 background loop / stop conditions
     "tick_interval_sec": 6,           # seconds between ticks when running in the background
     "max_ticks": 0,                   # 0 = unlimited; otherwise auto-pause at this tick
-    "stability_window": 0,            # 0 = off; auto-pause after N consecutive zero-mutation ticks
+    "stability_window": 4,            # 0 = off; auto-pause after N consecutive no-progress ticks (world reached equilibrium)
     # P5 heuristic perturbation (nudge / muse) — decision 12 (off by default)
     "nudge_strategy": "off",          # off | random | targeted | weighted
     "nudge_every_n_ticks": 1,         # emit nudges every N ticks
@@ -422,12 +422,15 @@ async def _apply_mutations(
                     if not rel:
                         continue
                     changed = {}
+                    old_weight = rel.weight if rel.weight is not None else 0.5
                     if m.get("weight_delta") is not None:
                         rel.weight = max(0.0, min(1.0, (rel.weight or 0.5) + float(m["weight_delta"])))
                         changed["weight"] = rel.weight
                     if m.get("weight") is not None:
                         rel.weight = max(0.0, min(1.0, float(m["weight"])))
                         changed["weight"] = rel.weight
+                    if "weight" in changed:
+                        changed["weight_delta"] = round(rel.weight - old_weight, 4)
                     if m.get("type"):
                         rel.type = m["type"]
                         changed["type"] = rel.type
@@ -533,7 +536,7 @@ def _is_duplicate_sim_event(pid: str, sim_id: str, name: str) -> bool:
     return False
 
 
-def _event_dedupe_corpus(pid: str, sim_id: str, *, limit: int = 35) -> list[dict]:
+def _event_dedupe_corpus(pid: str, sim_id: str, *, limit: int = 50) -> list[dict]:
     """Recent resolved + active pending events for LLM dedupe context."""
     scored: list[tuple[int, dict]] = []
     for eid in graph_engine.project_entities.get(pid, set()):
@@ -681,6 +684,21 @@ async def _apply_events(
 # ── ripeness helpers (preset discipline + autonomous pending) ────
 
 _CONFLICT_REL_TYPES = frozenset({"enemy", "rival"})
+# A charged relation must carry at least this much weight to count as live tension
+# worth seeding a new悬决 around — settled grudges sit below it and stay quiet.
+_TENSION_FLOOR = 0.5
+# Goal prefix written by _resolve_ripe_events once a participant's goal is resolved.
+_SETTLED_GOAL_PREFIX = "【已了结】"
+
+
+def _goal_is_settled(props: dict) -> bool:
+    """A character's goal counts as settled when explicitly marked achieved/defeated,
+    or when its goal text already carries the settled prefix."""
+    status = (props or {}).get("goal_status")
+    if status in ("achieved", "defeated"):
+        return True
+    goal = (props or {}).get("goal") or ""
+    return goal.startswith(_SETTLED_GOAL_PREFIX)
 _FUTURE_INTENT_MARKERS = (
     "今晚", "明日", "后天", "必须", "要让他", "要让她", "打算", "计划",
     "准备", "即将", "将要", "一定要", "务必",
@@ -794,14 +812,22 @@ def _scan_goal_conflicts(pid: str) -> list[dict]:
             continue
         if r.type not in _CONFLICT_REL_TYPES:
             continue
+        # Only live tension seeds new conflict — a settled-down grudge (low weight)
+        # must not be re-ignited tick after tick.
+        if (r.weight if r.weight is not None else 0.5) < _TENSION_FLOOR:
+            continue
         key = frozenset((r.source_id, r.target_id))
         if key in seen:
             continue
         seen.add(key)
         a, b = by_id[r.source_id], by_id[r.target_id]
-        ga = (a.properties or {}).get("goal") or ""
-        gb = (b.properties or {}).get("goal") or ""
+        pa, pb = (a.properties or {}), (b.properties or {})
+        ga = pa.get("goal") or ""
+        gb = pb.get("goal") or ""
         if not ga or not gb:
+            continue
+        # A participant who has already won or lost this fight no longer drives it.
+        if _goal_is_settled(pa) or _goal_is_settled(pb):
             continue
         short_a = ga[:24].rstrip("，。；")
         short_b = gb[:24].rstrip("，。；")
@@ -809,6 +835,22 @@ def _scan_goal_conflicts(pid: str) -> list[dict]:
         stakes = f"{a.name}（{ga[:80]}）与{b.name}（{gb[:80]}）目标冲突，须见分晓。"
         out.append({"name": name, "stakes": stakes, "participants": [a.name, b.name]})
     return out[:3]
+
+
+def _scene_has_forward_tension(pid: str, scenes: list[dict]) -> bool:
+    """Is there genuine unresolved tension pointing at the future this tick?
+
+    Used to gate the anti-drought machinery: in a settled world we let scenes stay
+    quiet rather than manufacturing events/pending just to keep the loop fed. True
+    when a scene carries a future-oriented intent, or a live (above-floor, unsettled)
+    goal conflict still exists.
+    """
+    for s in scenes:
+        for it in s.get("intents") or []:
+            summary = (it.get("summary") or "")
+            if summary and any(m in summary for m in _FUTURE_INTENT_MARKERS):
+                return True
+    return bool(_scan_goal_conflicts(pid))
 
 
 def _intents_suggest_pending(scenes: list[dict]) -> list[dict]:
@@ -956,6 +998,36 @@ def _event_participants(pid: str, event: Entity) -> list[Entity]:
 
 
 _STATE_KEYS = ("role", "title", "status", "power", "occupation", "goal", "mood")
+# State keys whose change marks real narrative progress. Deliberately excludes
+# `goal` and `mood`: the belief layer re-derives goal *text* almost every tick (and
+# moods swing constantly), so counting those as progress keeps `progress=True`
+# forever even while a sub-plot just spins. Goal *settlement* is captured instead
+# by the resolve_event op, which always counts as progress.
+_PROGRESS_STATE_KEYS = ("role", "title", "status", "power", "occupation")
+# Minimum relation-weight shift that counts as progress — smaller is mere jitter.
+_PROGRESS_WEIGHT_EPS = 0.05
+
+
+def _tick_made_progress(applied_mutations: list[dict]) -> bool:
+    """Did this tick move the world forward, or just keep it busy?
+
+    Progress = a pending settled or newly registered, a dedup-surviving new event,
+    a new/charged relation shift beyond jitter, a new entity, or a meaningful state
+    change (goal/role/status/power/…). Pure mood swings and belief syncs don't count.
+    """
+    for m in applied_mutations:
+        op = m.get("op")
+        if op in ("create_event", "resolve_event", "register_pending_event",
+                  "create_relation", "create_entity"):
+            return True
+        if op == "update_relation":
+            if abs(float(m.get("weight_delta") or 0.0)) > _PROGRESS_WEIGHT_EPS:
+                return True
+        elif op == "update_entity":
+            props = m.get("properties") or {}
+            if any(k in props for k in _PROGRESS_STATE_KEYS):
+                return True
+    return False
 
 
 def _event_world_state(pid: str, participants: list[Entity]) -> str:
@@ -1178,9 +1250,28 @@ async def _resolve_ripe_events(
         if consequences:
             applied.extend(await _apply_mutations(db, sim, consequences, []))
 
-        # Refresh participant goals in light of the settlement.
+        # Settle or refresh participant goals in light of the outcome.
+        # A goal the causal推演 judged achieved/defeated is *done* — we mark it
+        # 【已了结】 and stop re-deriving it, which removes the perpetual-motion
+        # fuel (winners no longer keep fighting fights they've already won). Only
+        # genuinely ongoing goals get re-cognized through reconcile_belief.
+        goal_status_map = resolution.get("participant_goal_status") or {}
         for pe in participants:
             pe_ent = graph_engine.entities.get(pe.id) or pe
+            gstatus = (goal_status_map.get(pe.name) or "ongoing").strip().lower()
+            if gstatus in ("achieved", "defeated"):
+                row = await db.get(Entity, pe.id)
+                if row:
+                    props = dict(row.properties or {})
+                    goal = props.get("goal") or ""
+                    if goal and not goal.startswith(_SETTLED_GOAL_PREFIX):
+                        props["goal"] = f"{_SETTLED_GOAL_PREFIX}{goal}"
+                    props["goal_status"] = gstatus
+                    row.properties = props
+                    pe_ent.properties = props
+                    applied.append({"op": "update_entity", "entity": row.name,
+                                    "properties": {"goal_status": gstatus}})
+                continue
             truth = {k: (pe_ent.properties or {}).get(k) for k in ("goal", "mood", "role", "status")
                        if (pe_ent.properties or {}).get(k)}
             if truth:
@@ -1500,12 +1591,15 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
             gen_events
             and not (verdict.get("events") or [])
             and not register_ops_pre
+            # Only nudge when real forward tension exists — a settled world is
+            # allowed to stay quiet so it can reach equilibrium and落幕.
+            and _scene_has_forward_tension(sim.project_id, scenes)
         ):
             drought_directive = (
                 "本 tick 场景非空但无事件产出：请至少产出 1 条 events（已发生事实）"
                 "或 1 条 register_pending_event（尚未发生的未来博弈）。"
             )
-            eff_min_sig = max(0.25, event_min_sig - 0.1)
+            eff_min_sig = max(0.4, event_min_sig - 0.1)
             metrics["event_min_sig_relaxed"] = eff_min_sig
             await _release_db_lock(db, sim)
             drought_verdict = await ai_service.ai_adjudicate(
@@ -1610,6 +1704,9 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
     applied_mutations.extend(resolve_ops)
 
     metrics["mutation_count"] = len(applied_mutations)
+    # Stop signal feeds on *progress*, not motion — anti-drought machinery keeps the
+    # mutation count >0 forever, so the loop must ask whether the world advanced.
+    metrics["progress"] = _tick_made_progress(applied_mutations)
 
     # 3c. Oracle belief re-cognition — when a property was just opened to a
     #     specific whitelist, fold the newly-revealed truth into each of those
