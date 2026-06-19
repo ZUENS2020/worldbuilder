@@ -81,15 +81,16 @@ WorldBuilder 用**图距离驱动的精准上下文注入**取代关键词匹配
 | **信念层** | 每角色维护主观世界副本；**信念 / 真相** 面板对照过时认知与 canonical 真相 |
 | **世界书** | 图锚定硬检索（`global` 常驻 + `entity` 挂载），按在场实体注入 |
 | **启发扰动（Nudge）** | 随机 / 指定 / 按人脉向角色注入模糊预感，打破僵局 |
-| **悬决事件 & 推演结算** | 预设或自主登记的 `pending` 事件，因果成熟后 `resolve` 落下不可逆后果 |
-| **事件结晶** | Oracle 将重要转折凝结为事件节点，互动流中以芯片展示 |
+| **悬决事件 & 推演结算** | 预设或自主登记的 `pending` 事件，因果成熟后 `resolve` 落下不可逆后果；结算时标注各参与者目标 `achieved`/`defeated`/`ongoing`，赢家目标落为「已了结」不再重复开战 |
+| **事件结晶** | Oracle 将重要转折凝结为事件节点，互动流中以芯片展示；语义去重折叠近义重复 |
+| **稳态落幕** | 以「进展度」（而非「有没有动」）判定世界是否入均衡；连续 `stability_window` 个无进展 tick 自动暂停并提示「🎬 本幕落幕」，可继续推进注入新变量 |
 | **ST 回写** | SillyTavern 对话先入队，在 **「ST 回写」** 标签审阅后手动 / 每 N 轮 / 自动 LLM 落库 |
 
 #### 设计原则
 
 - **LLM = 角色决策 + 世界裁决**，不是编剧；prompt 强调因果合理性，而非戏剧张力
 - **预设锚点仅作冷启动**；`sequence_order` 约束导入时的引导事件顺序，之后由角色目标驱动自主登记新悬决
-- **无终局检测** —— 不设三幕结构或自动结局；世界可持续演化
+- **不写结局，但会落幕** —— 不设三幕结构或剧本化结局；但当世界达到新均衡（连续若干 tick 无实质进展）时**自动暂停并提示「本幕落幕」**，而非靠制造冲突无限续命。「导演不决定发生什么，世界状态决定」——真实世界也会停在新的平衡上
 - **Actor 信息不对称** —— 每场相遇只从发起方信念副本叙事，对手信念事后机械同步
 
 ### SillyTavern 桥接
@@ -221,8 +222,8 @@ WORLDBUILDER_API=http://localhost:8090/api python3 import_world.py manor_mystery
 |------|------|
 | `pending` | 登记时写入 `stakes`、`due_tick`（可选）、`sequence_order`（预设锚点） |
 | Oracle `ripe` | LLM 判断因果成熟；`due_tick` 前 ripe 信号无效 |
-| `resolve` | 结算后 `status=resolved`，写入 `outcome`，产生不可逆突变 |
-| 自主登记 | 角色目标冲突扫描 / 悬决空窗补种 / intent 兜底，无需人工预埋 |
+| `resolve` | 结算后 `status=resolved`，写入 `outcome`，产生不可逆突变；并标注各参与者 `goal_status`（`achieved`/`defeated` 的目标落为「已了结」，仅 `ongoing` 重派新目标） |
+| 自主登记 | 角色目标冲突扫描 / 悬决空窗补种 / intent 兜底，无需人工预埋；均需**真实前向张力**（关系权重达档 + 目标未了结）才触发，世界静下来时允许 pending 队列保持空 |
 
 ### 关键配置项（`Simulation.config`）
 
@@ -231,11 +232,12 @@ WORLDBUILDER_API=http://localhost:8090/api python3 import_world.py manor_mystery
 | `max_encounters_per_tick` | 4 | 每 tick 最多几场相遇 |
 | `scheduler_mix_conflict` | false | 额外撮合一对敌对/陌生角色 |
 | `generate_events` | true | Oracle 是否结晶事件节点 |
+| `event_min_significance` | 0.6 | 场景结晶为事件节点的显著度阈值（越高越克制） |
 | `pending_max_age` | 8 | 悬决超时强制结算（0=关闭） |
 | `nudge_strategy` | off | 扰动策略：off / random / targeted / weighted |
 | `tick_interval_sec` | 6 | 自动演化间隔（秒） |
 | `max_ticks` | 0 | 自动暂停上限（0=不限） |
-| `stability_window` | 0 | 连续无突变 tick 后自动暂停 |
+| `stability_window` | 4 | 连续无**进展** tick 后自动落幕暂停（`reason=quiescent`，0=关闭） |
 
 ### 推荐工作流（雾港·黎氏庄园）
 
@@ -249,7 +251,9 @@ cd scripts && python3 import_world.py manor_mystery_data
 4. 在 **信念 / 真相** 面板切换观察者，对照主观认知与 canonical 真相
 5. 事件图 / 时间轴查看因果链 `followed_by` 如何生长
 
-预设三个锚点（`sequence_order` 1→2→3）应在因果链上依次结算：**遗嘱宣读 → 真遗嘱浮现 → 死因鉴定结论**。之后世界由角色目标驱动继续演化。
+预设三个锚点（`sequence_order` 1→2→3）应在因果链上依次结算：**遗嘱宣读 → 真遗嘱浮现 → 死因鉴定结论**。之后世界由角色目标驱动继续演化；当各方目标尘埃落定、连续数 tick 无实质进展时，模拟器会**自动暂停并在互动流顶部显示「🎬 本幕落幕」**——此时可手动继续推进（注入新变量）或重置重跑。
+
+> 推演引擎的完整机制（推演结算、进展度判定、落幕、目标可达成、防枯竭节流阀）见 [`docs/simulation-engine.md`](docs/simulation-engine.md)。
 
 ---
 
@@ -428,7 +432,7 @@ world_builder/
 │       └── …
 ├── st-plugin/                # SillyTavern 插件 v0.6
 ├── scripts/                  # 数据导入、示例图谱、联调与回归测试
-├── docs/import-export.md
+├── docs/                     # import-export.md, simulation-engine.md
 ├── skills/
 └── docker-compose.yml
 ```
