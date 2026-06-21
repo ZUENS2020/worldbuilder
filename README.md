@@ -48,6 +48,7 @@ graph LR
 ## 目录
 
 - [核心能力](#-核心能力)
+- [与同类项目对比](#-与同类项目对比)
 - [架构总览](docs/architecture.md)
 - [快速开始](#-快速开始)
 - [导入世界观数据](#-导入世界观数据)
@@ -136,6 +137,29 @@ flowchart LR
 
 - **角色卡导入** —— 从 Palette 导入 TavernAI / SillyTavern 角色卡（`.json` 或嵌入 PNG），自动创建人物实体；内嵌 `character_book` 转为实体挂载世界书
 - **ST 插件 v0.6** —— 图谱 / 可见性 / 信念上下文注入、模拟记忆块、对话回写队列
+
+---
+
+## 🔍 与同类项目对比
+
+WorldBuilder 横跨两个常被分开看待的赛道——**生成式智能体模拟**（Generative Agents 一脉）与**世界观创作 / 角色扮演上下文**（Lorebook、worldbuilding wiki）。它的差异化不在于单点更强，而在于**把这两条线缝在同一张知识图谱上**：
+
+| 项目 | 定位 | 核心机制 | 自主因果推演 | 信息不对称 / 战争迷雾 | 角色扮演对话集成 | 中文优先 |
+|------|------|----------|:---:|:---:|:---:|:---:|
+| **WorldBuilder（本项目）** | 知识图谱世界观构建 **+** Agent 推演 | 图谱内核 + 图距离上下文注入 + Actor/Oracle 推演 | ✅ tick 制，无导演 | ✅ 信念副本 / 可见性迷雾 | ✅ 原生 ST 插件（注入 + 回写） | ✅ |
+| [Stanford Generative Agents](https://github.com/joonspk-research/generative_agents) | 学术研究：智能体社会行为模拟（Smallville） | 记忆流（recency·relevance·importance）+ 反思 + 规划 | ✅ 挂钟制小镇沙盒 | ❌ 全知，无主观信念对照 | ❌ 非对话产品，依赖回放数据 | ❌ |
+| [AI Town](https://github.com/a16z-infra/ai-town) | 可部署的生成式智能体小镇 | GA 思路工程化（Convex + JS），实时多人 | ✅ 实时漫游 / 对话 | ❌ | ➖ 内置聊天，非外接 RP | ❌ |
+| [GPTeam](https://github.com/101dotxyz/GPTeam) | 多智能体协作模拟 | GA 启发的记忆 / 计划 / 反应（Python） | ✅ 偏任务协作 | ❌ | ❌ | ❌ |
+| [SillyTavern](https://github.com/SillyTavern/SillyTavern) + Lorebook | 角色扮演对话前端 | 关键词触发的 World Info 全量注入 | ❌ 无模拟 | ❌ | ✅ 本体即 RP | ➖ |
+| World Anvil / LegendKeeper | 世界观创作 wiki | 条目 + 手动关系图 | ❌ | ❌ | ❌ | ➖ |
+
+> ✅ 具备　➖ 部分 / 非原生　❌ 不具备。对比基于各项目的**主要定位**，功能边界随版本演进。
+
+**一句话定位**：WorldBuilder ≈ *Generative Agents 的记忆 / 推演内核* + *世界观创作工具* + *Lorebook 的精准替代品*，三者合一，且**中文优先**。
+
+- 与 **Generative Agents 一脉**（GA / AI Town / GPTeam）相比：它们是「让智能体自己活起来」的沙盒，WorldBuilder 把同样的认知循环（[记忆三维检索](docs/architecture.md#6-记忆检索从纯时间到三维加权致敬-generative-agents)就直接致敬 GA `new_retrieve`）接到**你亲手构建的世界观图谱**上，并额外引入**信念副本 / 战争迷雾**——同一件事不同角色记忆可以不同，这是悬疑推演的张力来源。
+- 与 **SillyTavern 一脉**相比：Lorebook 靠关键词命中全量注入，token 浪费且易串词；WorldBuilder 用 **N-hop 图距离**精准注入并主动预警设定矛盾。两者并非纯竞争——WorldBuilder **原生提供 ST 插件**，把图谱、模拟记忆与 RP 对话打通。
+- 与 **worldbuilding wiki**（World Anvil 等）相比：它们擅长「记录」一个静态世界，WorldBuilder 让这个世界**自己往前推演**，并把设定直接喂给 AI 对话。
 
 ---
 
