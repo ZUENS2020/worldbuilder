@@ -17,11 +17,38 @@ WorldBuilder 用**图距离驱动的精准上下文注入**取代关键词匹配
 
 此外，内置 **Agent 关系演化模拟器**（因果推演、战争迷雾、信念层）与 **SillyTavern 插件**（上下文注入 + 对话回写），把图谱、模拟记忆与角色扮演对话打通。
 
+### 一图看懂
+
+WorldBuilder = **一个知识图谱内核 + 两台引擎 + 一座对外桥梁**。知识图谱是唯一事实源，两台引擎从它取数、向它回写，SillyTavern 桥把这一切接进角色扮演对话：
+
+```mermaid
+graph LR
+    G[("知识图谱内核<br/>实体 · 关系 · 信念 · 记忆<br/>(唯一事实源)")]
+    E1["引擎①<br/>图距离上下文注入<br/>取代关键词 Lorebook"]
+    E2["引擎②<br/>因果推演模拟器<br/>取代剧情导演"]
+    ST["SillyTavern 桥<br/>注入 + 回写"]
+    AI["OpenRouter LLM"]
+
+    E1 <--> G
+    E2 <--> G
+    ST <--> G
+    E1 -.->|推断·矛盾·背景| AI
+    E2 -.->|Actor · Oracle · 结算| AI
+    ST -.-> AI
+
+    style G fill:#1f2937,stroke:#60a5fa,color:#e5e7eb
+    style E1 fill:#1e3a5f,stroke:#60a5fa,color:#e5e7eb
+    style E2 fill:#14532d,stroke:#34d399,color:#e5e7eb
+```
+
+> 📐 配图详解整个项目的设计思路（数据模型、两台引擎、信念层、记忆检索、落幕机制、ST 桥）见 **[`docs/architecture.md`](docs/architecture.md)**。
+
 ---
 
 ## 目录
 
 - [核心能力](#-核心能力)
+- [架构总览](docs/architecture.md)
 - [快速开始](#-快速开始)
 - [导入世界观数据](#-导入世界观数据)
 - [模拟器：推演机制](#-模拟器推演机制)
@@ -68,9 +95,20 @@ WorldBuilder 用**图距离驱动的精准上下文注入**取代关键词匹配
 
 模拟器以 **tick** 为单位推进世界，定位是**因果推演引擎**，而非剧情导演：
 
-```
-调度相遇 → Actor（角色主观行动）→ Oracle（世界裁决）
-  → 关系/状态/事件突变 → 信念同步 → 情景记忆 → SimTick 快照
+```mermaid
+flowchart LR
+    N["Nudge<br/>(可选扰动)"] --> Sch["Scheduler<br/>撮合相遇"]
+    Sch --> Act["Actor<br/>角色主观行动"]
+    Act --> Ora["Oracle<br/>整 tick 裁决"]
+    Ora --> Res["推演结算<br/>悬决落不可逆后果"]
+    Res --> Bel["信念同步"]
+    Bel --> Mem["情景记忆"]
+    Mem --> Snap["SimTick 快照<br/>+ 进展度判定"]
+    Snap -.->|连续无进展| Curtain["🎬 本幕落幕"]
+
+    style Act fill:#14532d,stroke:#34d399,color:#e5e7eb
+    style Ora fill:#1e3a5f,stroke:#60a5fa,color:#e5e7eb
+    style Curtain fill:#3f2937,stroke:#f59e0b,color:#e5e7eb
 ```
 
 | 能力 | 说明 |
