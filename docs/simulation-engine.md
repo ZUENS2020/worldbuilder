@@ -112,6 +112,28 @@ if stability_window:
 
 ---
 
+## 3.5 记忆检索：从纯时间到三维加权
+
+> 致敬 Stanford **Generative Agents** 的 `new_retrieve`。
+
+每场相遇，Actor 会拿到自己的「近期经历」记忆块。早期实现是**纯按时间**取最近 K 条（`episodics[-recent_k:]`）——久远但高度相关的关键记忆（如与当前对手的旧恩怨）会被最新的闲聊挤掉，削弱推演的因果连续性。
+
+现在 `get_memory_block`（`memory.py`）在收到 focal 时改走 GA 式三维加权打分，对未压缩 episodics 评分后取 top-K（长期 summary 块照旧全量纳入，不参与打分）：
+
+| 维度 | 取值 | 实现 |
+|------|------|------|
+| **recency** | `decay ** rank`，最新最高（`decay=0.99`） | `_recency_scores` |
+| **importance** | 直接读已存储的 `salience`（结算余波 0.9 / 普通场景 0.5） | `_importance_scores` |
+| **relevance** | focal 词作为子串命中 `content` 的比例 + 参与者命中当前对手的加成 | `_relevance_scores` |
+
+三维各自归一化到 `[0,1]` 后加权求和，默认权重镜像 GA 的 `gw`：**recency 0.5 · relevance 3 · importance 2**。
+
+> **为什么不用 embedding？** relevance 用中文安全的**子串/参与者重叠**实现，零新依赖、零额外延迟（GA 自身也内置了这条非 embedding 关键词路径）。focal 在调用现场由 `_actor_focal` 组装：当前对手名 + 双方 `goal` 短语 + 本 sim 活跃 pending 事件的 `name`/`stakes`——即「这场戏在谈什么」。
+
+检索**只重排 Actor 记得哪些事，绝不改写世界状态、不碰目标**。`memory_weighted_retrieval=False` 可一键回退纯时间窗口（旧行为）。纯函数 `_score_memories` 由回归测试直接覆盖（见 §7）。
+
+---
+
 ## 4. 防枯竭装置的节流阀
 
 防枯竭装置本身不能删——没有它们世界可能过早枯竭。但它们曾**无条件**制造冲突，把世界架在永不停歇的状态。现在每个出口都加了**真实前向张力**门槛：
@@ -144,6 +166,10 @@ if stability_window:
 | 键 | 默认 | 说明 |
 |----|------|------|
 | `max_encounters_per_tick` | 4 | 每 tick 最多几场相遇 |
+| `memory_recent_k` | 8 | Actor 记忆块取多少条 episodic（加权检索的 top-K） |
+| `memory_weighted_retrieval` | true | 三维加权检索；false=回退纯时间窗口 |
+| `memory_recency_w` / `_relevance_w` / `_importance_w` | 0.5 / 3 / 2 | 检索三维权重（镜像 GA `gw`） |
+| `memory_recency_decay` | 0.99 | recency 维度的时间衰减 |
 | `scheduler_mix_conflict` | false | 额外撮合一对敌对/陌生角色 |
 | `generate_events` | true | Oracle 是否结晶事件节点 |
 | `event_min_significance` | 0.6 | 场景结晶为事件节点的显著度阈值 |
@@ -170,5 +196,9 @@ cd scripts && ../backend/venv/bin/python deduction_regression_test.py   # 期望
 | `test_progress_detection` | 近义重复 + mood 微调 → `progress=False`；权重净变化/新事件/状态变更 → `True`；恰好 0.05 抖动为负例 |
 | `test_scan_goal_conflicts` / `_below_floor` | 权重达档算候选、低于 `_TENSION_FLOOR` 被过滤 |
 | `test_settled_goal_not_reseeded` | `goal_status=achieved` 的角色不再被冲突扫描选中 |
+| `test_relevant_old_beats_irrelevant_recent` | 提到对手的久远记忆排名高于无关的最新闲聊 |
+| `test_participant_match_boost` | 参与者命中当前对手 → 相关度加成生效 |
+| `test_high_salience_surfaces` | 高 salience 余波压过低 salience 闲谈 |
+| `test_recency_only_fallback` | `relevance_w=importance_w=0` 还原为纯时间序（旧行为） |
 
 > 端到端验证只在沙盒副本或新建 demo 项目上跑，**严禁碰真实项目**。
