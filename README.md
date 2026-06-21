@@ -17,11 +17,38 @@ WorldBuilder 用**图距离驱动的精准上下文注入**取代关键词匹配
 
 此外，内置 **Agent 关系演化模拟器**（因果推演、战争迷雾、信念层）与 **SillyTavern 插件**（上下文注入 + 对话回写），把图谱、模拟记忆与角色扮演对话打通。
 
+### 一图看懂
+
+WorldBuilder = **一个知识图谱内核 + 两台引擎 + 一座对外桥梁**。知识图谱是唯一事实源，两台引擎从它取数、向它回写，SillyTavern 桥把这一切接进角色扮演对话：
+
+```mermaid
+graph LR
+    G[("知识图谱内核<br/>实体 · 关系 · 信念 · 记忆<br/>(唯一事实源)")]
+    E1["引擎①<br/>图距离上下文注入<br/>取代关键词 Lorebook"]
+    E2["引擎②<br/>因果推演模拟器<br/>取代剧情导演"]
+    ST["SillyTavern 桥<br/>注入 + 回写"]
+    AI["OpenRouter LLM"]
+
+    E1 <--> G
+    E2 <--> G
+    ST <--> G
+    E1 -.->|推断·矛盾·背景| AI
+    E2 -.->|Actor · Oracle · 结算| AI
+    ST -.-> AI
+
+    style G fill:#1f2937,stroke:#60a5fa,color:#e5e7eb
+    style E1 fill:#1e3a5f,stroke:#60a5fa,color:#e5e7eb
+    style E2 fill:#14532d,stroke:#34d399,color:#e5e7eb
+```
+
+> 📐 配图详解整个项目的设计思路（数据模型、两台引擎、信念层、记忆检索、落幕机制、ST 桥）见 **[`docs/architecture.md`](docs/architecture.md)**。
+
 ---
 
 ## 目录
 
 - [核心能力](#-核心能力)
+- [架构总览](docs/architecture.md)
 - [快速开始](#-快速开始)
 - [导入世界观数据](#-导入世界观数据)
 - [模拟器：推演机制](#-模拟器推演机制)
@@ -68,9 +95,20 @@ WorldBuilder 用**图距离驱动的精准上下文注入**取代关键词匹配
 
 模拟器以 **tick** 为单位推进世界，定位是**因果推演引擎**，而非剧情导演：
 
-```
-调度相遇 → Actor（角色主观行动）→ Oracle（世界裁决）
-  → 关系/状态/事件突变 → 信念同步 → 情景记忆 → SimTick 快照
+```mermaid
+flowchart LR
+    N["Nudge<br/>(可选扰动)"] --> Sch["Scheduler<br/>撮合相遇"]
+    Sch --> Act["Actor<br/>角色主观行动"]
+    Act --> Ora["Oracle<br/>整 tick 裁决"]
+    Ora --> Res["推演结算<br/>悬决落不可逆后果"]
+    Res --> Bel["信念同步"]
+    Bel --> Mem["情景记忆"]
+    Mem --> Snap["SimTick 快照<br/>+ 进展度判定"]
+    Snap -.->|连续无进展| Curtain["🎬 本幕落幕"]
+
+    style Act fill:#14532d,stroke:#34d399,color:#e5e7eb
+    style Ora fill:#1e3a5f,stroke:#60a5fa,color:#e5e7eb
+    style Curtain fill:#3f2937,stroke:#f59e0b,color:#e5e7eb
 ```
 
 | 能力 | 说明 |
@@ -79,6 +117,7 @@ WorldBuilder 用**图距离驱动的精准上下文注入**取代关键词匹配
 | **回放与重置** | Tick 时间轴拖拽回看历史；一键重置到模拟创建时的初始状态 |
 | **战争迷雾** | 实体级 / 属性级可见性；画布「以…视角」预览 |
 | **信念层** | 每角色维护主观世界副本；**信念 / 真相** 面板对照过时认知与 canonical 真相 |
+| **多维记忆检索** | Actor 的「近期经历」按 recency·relevance·importance 三维加权选取（致敬 Generative Agents `new_retrieve`），让久远但相关的旧事也能浮现；relevance 用关键词/参与者重叠，零额外依赖 |
 | **世界书** | 图锚定硬检索（`global` 常驻 + `entity` 挂载），按在场实体注入 |
 | **启发扰动（Nudge）** | 随机 / 指定 / 按人脉向角色注入模糊预感，打破僵局 |
 | **悬决事件 & 推演结算** | 预设或自主登记的 `pending` 事件，因果成熟后 `resolve` 落下不可逆后果；结算时标注各参与者目标 `achieved`/`defeated`/`ongoing`，赢家目标落为「已了结」不再重复开战 |

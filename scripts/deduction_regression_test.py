@@ -27,8 +27,20 @@ from app.services.simulation import (  # noqa: E402
     _TENSION_FLOOR,
     _SETTLED_GOAL_PREFIX,
 )
+from app.services.memory import _score_memories, _top_k_ids  # noqa: E402
 from app.graph.engine import graph_engine  # noqa: E402
 from app.models.models import Entity, Relation  # noqa: E402
+
+
+class _FakeMem:
+    """Lightweight stand-in for an AgentMemory row (retrieval is a pure function
+    over .id / .tick / .salience / .content / .participants)."""
+    def __init__(self, mid, tick, salience, content, participants=None):
+        self.id = mid
+        self.tick = tick
+        self.salience = salience
+        self.content = content
+        self.participants = participants or []
 
 
 class _FakeEvent:
@@ -279,6 +291,58 @@ def test_event_dedupe_corpus_orders_by_tick():
     _reset_graph_for(pid)
 
 
+def test_relevant_old_beats_irrelevant_recent():
+    """A久远 memory mentioning the focal partner outranks the latest闲聊 that
+    doesn't — recency alone would have buried it."""
+    # Chronological order (oldest first), as get_memory_block loads them.
+    episodics = [
+        _FakeMem("old_rel", tick=1, salience=0.5, content="与东海帝王在天皇赏上结下死仇"),
+        _FakeMem("mid", tick=5, salience=0.5, content="在食堂吃了草料"),
+        _FakeMem("new_irrel", tick=9, salience=0.5, content="今天天气不错，散了散步"),
+    ]
+    focal_terms = ["东海帝王", "天皇赏"]
+    scores = _score_memories(episodics, focal_terms, [], None)
+    assert scores["old_rel"] > scores["new_irrel"]
+    # Top-1 must surface the relevant-but-old memory.
+    assert _top_k_ids(scores, 1) == {"old_rel"}
+
+
+def test_participant_match_boost():
+    """Two memories with identical text/recency; the one whose participants
+    include the focal partner scores higher."""
+    episodics = [
+        _FakeMem("with_partner", tick=2, salience=0.5, content="一次寻常的交谈", participants=["东海帝王"]),
+        _FakeMem("with_other", tick=2, salience=0.5, content="一次寻常的交谈", participants=["特别周"]),
+    ]
+    scores = _score_memories(episodics, [], ["东海帝王"], None)
+    assert scores["with_partner"] > scores["with_other"]
+
+
+def test_high_salience_surfaces():
+    """When recency and relevance are equal, the high-salience aftermath memory
+    outranks low-salience chatter."""
+    episodics = [
+        _FakeMem("aftermath", tick=3, salience=0.9, content="比赛结束"),
+        _FakeMem("chatter", tick=3, salience=0.2, content="比赛结束"),
+    ]
+    scores = _score_memories(episodics, [], [], None)
+    assert scores["aftermath"] > scores["chatter"]
+
+
+def test_recency_only_fallback():
+    """relevance_w=importance_w=0 reduces to pure recency ordering (old behavior)."""
+    episodics = [
+        _FakeMem("a", tick=1, salience=0.9, content="提到东海帝王"),
+        _FakeMem("b", tick=2, salience=0.1, content="无关闲聊"),
+        _FakeMem("c", tick=3, salience=0.1, content="无关闲聊"),
+    ]
+    w = {"recency_w": 1.0, "relevance_w": 0.0, "importance_w": 0.0, "recency_decay": 0.99}
+    scores = _score_memories(episodics, ["东海帝王"], ["东海帝王"], w)
+    # Newest (c) wins despite a being relevant + high-salience; b > a too.
+    assert scores["c"] > scores["b"] > scores["a"]
+    assert _top_k_ids(scores, 2) == {"b", "c"}
+
+
 def main() -> int:
     test_ripe_by_oracle_signal()
     test_oracle_ripe_blocked_before_due()
@@ -295,6 +359,10 @@ def main() -> int:
     test_norm_name_folds_width()
     test_promote_dormant_event_in_place()
     test_event_dedupe_corpus_orders_by_tick()
+    test_relevant_old_beats_irrelevant_recent()
+    test_participant_match_boost()
+    test_high_salience_surfaces()
+    test_recency_only_fallback()
     print("OK deduction_regression_test")
     return 0
 

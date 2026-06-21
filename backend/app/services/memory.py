@@ -16,6 +16,108 @@ from app.models.models import AgentMemory
 from app.services.ai_service import ai_summarize_memory
 
 
+# ── Multi-dimensional retrieval (after Generative Agents' `new_retrieve`) ──────
+# Stanford GA scores each memory by recency·relevance·importance (normalized,
+# weighted gw=[0.5, 3, 2]) and keeps the top-n. WorldBuilder's `salience`
+# (≈importance) was already stored but never used for selection, and there was
+# no relevance signal — retrieval was pure recency. We mirror GA's structure,
+# but compute relevance with Chinese-safe substring / participant overlap
+# instead of embeddings (GA itself ships an equivalent keyword path), so this
+# adds NO new dependency. Retrieval only re-ranks what an Actor *recalls*; it
+# never touches world state.
+
+# Default weights mirror GA's gw = [recency 0.5, relevance 3, importance 2].
+_DEFAULT_RETRIEVAL_WEIGHTS = {
+    "recency_w": 0.5,
+    "relevance_w": 3.0,
+    "importance_w": 2.0,
+    "recency_decay": 0.99,
+}
+# A participant whose name matches the focal partner is a strong relevance cue.
+_PARTICIPANT_MATCH_BONUS = 1.0
+
+
+def _recency_scores(episodics: list, decay: float) -> dict[str, float]:
+    """`decay ** rank` over chronological order — the most recent memory scores
+    highest. Mirrors GA `extract_recency`."""
+    n = len(episodics)
+    out: dict[str, float] = {}
+    for i, m in enumerate(episodics):
+        # i=0 is oldest; newest gets the smallest exponent → highest value.
+        out[m.id] = decay ** (n - 1 - i)
+    return out
+
+
+def _importance_scores(episodics: list) -> dict[str, float]:
+    """Use the already-stored `salience` (resolution aftermath 0.9 / scene 0.5).
+    Mirrors GA `extract_importance` (which reads node.poignancy)."""
+    return {m.id: float(m.salience if m.salience is not None else 0.5) for m in episodics}
+
+
+def _relevance_scores(
+    episodics: list, focal_terms: list[str], focal_participants: list[str],
+) -> dict[str, float]:
+    """Chinese-safe relevance without embeddings: fraction of focal terms that
+    appear as substrings in the memory content, plus a bonus when the memory's
+    participants intersect the focal partner(s)."""
+    terms = [t for t in (focal_terms or []) if t]
+    fp = {p for p in (focal_participants or []) if p}
+    out: dict[str, float] = {}
+    for m in episodics:
+        content = m.content or ""
+        if terms:
+            hits = sum(1 for t in terms if t in content)
+            score = hits / len(terms)
+        else:
+            score = 0.0
+        if fp and fp.intersection(set(m.participants or [])):
+            score += _PARTICIPANT_MATCH_BONUS
+        out[m.id] = score
+    return out
+
+
+def _normalize_scores(d: dict[str, float]) -> dict[str, float]:
+    """Scale values into [0, 1]. Mirrors GA `normalize_dict_floats` — when every
+    value is equal (range 0) they all collapse to the midpoint 0.5."""
+    if not d:
+        return d
+    vals = d.values()
+    lo, hi = min(vals), max(vals)
+    rng = hi - lo
+    if rng == 0:
+        return {k: 0.5 for k in d}
+    return {k: (v - lo) / rng for k, v in d.items()}
+
+
+def _score_memories(
+    episodics: list,
+    focal_terms: list[str],
+    focal_participants: list[str],
+    weights: dict | None = None,
+) -> dict[str, float]:
+    """Combined recency+relevance+importance score per memory id. Pure: no DB,
+    no async — fed lightweight objects in tests. Mirrors GA `new_retrieve`'s
+    `master_out` computation."""
+    w = {**_DEFAULT_RETRIEVAL_WEIGHTS, **(weights or {})}
+    rec = _normalize_scores(_recency_scores(episodics, float(w["recency_decay"])))
+    rel = _normalize_scores(_relevance_scores(episodics, focal_terms, focal_participants))
+    imp = _normalize_scores(_importance_scores(episodics))
+    out: dict[str, float] = {}
+    for m in episodics:
+        out[m.id] = (
+            float(w["recency_w"]) * rec.get(m.id, 0.0)
+            + float(w["relevance_w"]) * rel.get(m.id, 0.0)
+            + float(w["importance_w"]) * imp.get(m.id, 0.0)
+        )
+    return out
+
+
+def _top_k_ids(scores: dict[str, float], k: int) -> set[str]:
+    """The k highest-scoring ids. Mirrors GA `top_highest_x_values`."""
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:k]
+    return {kid for kid, _ in ranked}
+
+
 async def append_memory(
     db: AsyncSession,
     *,
@@ -73,14 +175,31 @@ async def get_memory_block(
     simulation_id: str,
     entity_id: str,
     recent_k: int = 8,
+    focal_terms: list[str] | None = None,
+    focal_participants: list[str] | None = None,
+    weights: dict | None = None,
 ) -> str:
     """Build the memory context text for an Actor: all long-term summaries +
-    the most recent K uncompacted episodics. Compacted episodics are omitted
-    (their content lives on in the summary)."""
+    the K most salient uncompacted episodics. Compacted episodics are omitted
+    (their content lives on in the summary).
+
+    Selection: when a focal (`focal_terms` / `focal_participants`) is given, the
+    K episodics are chosen by GA-style recency+relevance+importance scoring
+    (see `_score_memories`) — so a relevant-but-old memory can surface over
+    irrelevant recent chatter. With no focal, behaviour is the legacy pure
+    recency window (`episodics[-recent_k:]`). Either way they render in tick
+    order for readability."""
     rows = await _load_agent_memories(db, simulation_id, entity_id)
     summaries = [m for m in rows if m.kind == "summary"]
     episodics = [m for m in rows if m.kind == "episodic" and not _is_compacted(m)]
-    recent = episodics[-recent_k:]
+
+    has_focal = bool(focal_terms) or bool(focal_participants)
+    if has_focal and len(episodics) > recent_k:
+        scores = _score_memories(episodics, focal_terms or [], focal_participants or [], weights)
+        keep_ids = _top_k_ids(scores, recent_k)
+        recent = [m for m in episodics if m.id in keep_ids]  # preserves tick order
+    else:
+        recent = episodics[-recent_k:]
 
     lines: list[str] = []
     if summaries:

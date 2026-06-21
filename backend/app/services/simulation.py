@@ -11,6 +11,7 @@ mirror), mirroring the pattern in routers/entities.py and routers/transforms.py.
 """
 
 import random
+import re
 import time
 import unicodedata
 import uuid
@@ -36,6 +37,12 @@ DEFAULT_CONFIG = {
     "scheduler_mix_conflict": False,    # also stage one charged (enemy/stranger) pair per tick
     "memory_recent_k": 8,
     "memory_compact_threshold": 12,
+    # 记忆检索：从纯时间窗口 → GA new_retrieve 式三维加权（recency·relevance·importance）
+    "memory_weighted_retrieval": True,   # False = 回退纯时间窗口（旧行为）
+    "memory_recency_w": 0.5,             # 镜像 GA gw[0]
+    "memory_relevance_w": 3.0,           # 镜像 GA gw[1]
+    "memory_importance_w": 2.0,          # 镜像 GA gw[2]
+    "memory_recency_decay": 0.99,        # 镜像 GA recency_decay
     "generate_events": True,          # Oracle crystallizes significant happenings into event nodes
     "event_min_significance": 0.6,    # only events at/above this significance become nodes
     "event_dedupe": True,             # LLM semantic dedupe against recent events/pending
@@ -1458,6 +1465,42 @@ async def reset_simulation(db: AsyncSession, sim: Simulation) -> dict:
 
 # ── public API ───────────────────────────────────────────────────
 
+_FOCAL_SPLIT = re.compile(r"[，。、；：,.;:！？!?\s（）()「」“”\"']+")
+
+
+def _split_focal_phrases(text: str) -> list[str]:
+    """Break a goal/stakes sentence into short Chinese-safe substrings that may
+    appear verbatim in a memory's content. Drops fragments shorter than 2 chars."""
+    return [p for p in _FOCAL_SPLIT.split(text or "") if len(p) >= 2]
+
+
+def _actor_focal(observer, partner, pid: str, sid: str) -> tuple[list[str], list[str]]:
+    """Build the focal (terms, participants) for an Actor's memory retrieval:
+    the partner's name, both sides' goal phrases, and the names/stakes of this
+    sim's active pending events — i.e. what this scene is *about*."""
+    terms: list[str] = [partner.name]
+    terms += _split_focal_phrases((observer.properties or {}).get("goal") or "")
+    terms += _split_focal_phrases((partner.properties or {}).get("goal") or "")
+    for eid in graph_engine.project_entities.get(pid, set()):
+        e = graph_engine.entities.get(eid)
+        if not e or e.type != "event":
+            continue
+        props = e.properties or {}
+        if props.get("status") != "pending":
+            continue
+        meta = props.get("_sim") if isinstance(props.get("_sim"), dict) else {}
+        owner = meta.get("sim_id")
+        if owner and owner != sid:
+            continue
+        if e.name:
+            terms.append(e.name)
+        terms += _split_focal_phrases(props.get("stakes") or "")
+    # De-dup while preserving order.
+    seen: set[str] = set()
+    uniq = [t for t in terms if not (t in seen or seen.add(t))]
+    return uniq, [partner.name]
+
+
 async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
     """Advance the simulation one tick and persist a SimTick row."""
     t0 = time.monotonic()
@@ -1469,6 +1512,16 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
     gen_events = bool(_cfg(sim, "generate_events"))
     event_min_sig = float(_cfg(sim, "event_min_significance") or 0.5)
     temperature = float(_cfg(sim, "temperature") or 0.8)
+    mem_weights = (
+        {
+            "recency_w": float(_cfg(sim, "memory_recency_w") or 0.5),
+            "relevance_w": float(_cfg(sim, "memory_relevance_w") or 3.0),
+            "importance_w": float(_cfg(sim, "memory_importance_w") or 2.0),
+            "recency_decay": float(_cfg(sim, "memory_recency_decay") or 0.99),
+        }
+        if bool(_cfg(sim, "memory_weighted_retrieval"))
+        else None
+    )
 
     metrics = {"llm_calls": 0, "encounters": 0, "nudges": 0, "mutation_count": 0}
 
@@ -1505,9 +1558,17 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
         ctx = await belief.build_actor_context(
             db, sim, a_id, b_id, world_entries=world_entries, recent_k=recent_k,
         )
+        a_terms, a_parts = _actor_focal(a, b, sim.project_id, sim.id)
+        b_terms, b_parts = _actor_focal(b, a, sim.project_id, sim.id)
         mem_blocks = {
-            a.name: await get_memory_block(db, simulation_id=sim.id, entity_id=a_id, recent_k=recent_k),
-            b.name: await get_memory_block(db, simulation_id=sim.id, entity_id=b_id, recent_k=recent_k),
+            a.name: await get_memory_block(
+                db, simulation_id=sim.id, entity_id=a_id, recent_k=recent_k,
+                focal_terms=a_terms, focal_participants=a_parts, weights=mem_weights,
+            ),
+            b.name: await get_memory_block(
+                db, simulation_id=sim.id, entity_id=b_id, recent_k=recent_k,
+                focal_terms=b_terms, focal_participants=b_parts, weights=mem_weights,
+            ),
         }
         scene_nudges = {
             name: nudges[name] for name in (a.name, b.name) if name in nudges
