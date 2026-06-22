@@ -1,5 +1,7 @@
 # 导入 / 导出 (Import & Export)
 
+**简体中文** · [English](import-export.en.md)
+
 WorldBuilder 支持两类导入导出：
 
 | 类型 | 范围 | 导入目标 | 入口 |

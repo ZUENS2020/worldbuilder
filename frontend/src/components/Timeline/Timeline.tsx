@@ -1,9 +1,11 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../stores/appStore';
 import { ENTITY_CONFIG } from '../../types';
 import type { Entity } from '../../types';
 
 export default function Timeline() {
+  const { t } = useTranslation();
   const { entities, relations, setSelectedEntity, selectedEntityIds } = useAppStore();
 
   // Get events sorted by time
@@ -64,9 +66,9 @@ export default function Timeline() {
     }}>
       {/* Timeline header */}
       <div className="mt-panel-title">
-        ⏳ 时间轴 · Timeline
+        {t('timeline.title')}
         <span style={{ color: 'var(--mt-text-muted)', fontSize: 10, fontWeight: 400, marginLeft: 8 }}>
-          {events.length} 事件 · {timedEntities.length} 时间节点
+          {t('timeline.summary', { events: events.length, nodes: timedEntities.length })}
         </span>
       </div>
 
@@ -74,7 +76,7 @@ export default function Timeline() {
       <div className="mt-panel-body" style={{ padding: '10px 16px', display: 'flex', gap: 0, overflowX: 'auto', overflowY: 'hidden' }}>
         {timedEntities.length === 0 ? (
           <div style={{ color: 'var(--mt-text-muted)', fontSize: 11, padding: '8px 0' }}>
-            暂无时间节点。为事件实体添加 "time" 属性即可显示在时间轴上。
+            {t('timeline.empty')}
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0 }}>
@@ -128,10 +130,10 @@ export default function Timeline() {
                     {simTick != null && <span style={{ color: 'var(--mt-text-faint)' }}> · t{simTick}</span>}
                   </div>
                   {status === 'pending' && (
-                    <div style={{ fontSize: 8, color: '#5a4ba8', marginBottom: 2 }}>🕓 悬决</div>
+                    <div style={{ fontSize: 8, color: '#5a4ba8', marginBottom: 2 }}>{t('timeline.pending')}</div>
                   )}
                   {status === 'resolved' && (
-                    <div style={{ fontSize: 8, color: '#1f7a4d', marginBottom: 2 }}>✅ 已结算</div>
+                    <div style={{ fontSize: 8, color: '#1f7a4d', marginBottom: 2 }}>{t('timeline.resolved')}</div>
                   )}
 
                   {/* Entity name */}

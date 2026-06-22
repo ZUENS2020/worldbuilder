@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSimStore } from '../../stores/simStore';
 import { useAppStore } from '../../stores/appStore';
 import { api } from '../../services/api';
@@ -44,6 +45,7 @@ function relKey(r: BeliefRelation): string {
 }
 
 export default function BeliefPanel() {
+  const { t } = useTranslation();
   const sim = useSimStore((s) => s.sim);
   const projectId = useAppStore((s) => s.project?.id);
   const entities = useAppStore((s) => s.entities);
@@ -84,7 +86,7 @@ export default function BeliefPanel() {
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '8px 12px', borderBottom: '1px solid var(--mt-border)',
       }}>
-        <span style={{ fontSize: 11, color: 'var(--mt-text-muted)' }}>以…的视角：</span>
+        <span style={{ fontSize: 11, color: 'var(--mt-text-muted)' }}>{t('belief.perspective')}</span>
         <select
           value={observerId}
           onChange={(e) => setObserverId(e.target.value)}
@@ -98,7 +100,7 @@ export default function BeliefPanel() {
           ))}
         </select>
         <span style={{ fontSize: 10, color: 'var(--mt-text-faint)', marginLeft: 'auto' }}>
-          {loading ? '加载中…' : `${rows.length} 个认知对象`}
+          {loading ? t('belief.loading') : t('belief.subjectCount', { count: rows.length })}
         </span>
       </div>
 
@@ -106,8 +108,8 @@ export default function BeliefPanel() {
         {rows.length === 0 && !loading && (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--mt-text-faint)', fontSize: 12 }}>
             {sim
-              ? `${observerName || '该角色'}还没有任何信念。单步推进后，TA 感知到的世界会在这里与真相对照。`
-              : '先选择一个模拟。'}
+              ? t('belief.emptyWithObserver', { name: observerName || t('belief.defaultObserver') })
+              : t('belief.emptyNoSim')}
           </div>
         )}
         {rows.map((r) => (
@@ -119,6 +121,7 @@ export default function BeliefPanel() {
 }
 
 function SubjectCard({ row, self }: { row: BeliefRow; self: boolean }) {
+  const { t } = useTranslation();
   const keys = useMemo(() => {
     const set = new Set<string>([
       ...Object.keys(row.believed_properties || {}),
@@ -170,17 +173,17 @@ function SubjectCard({ row, self }: { row: BeliefRow; self: boolean }) {
         borderBottom: '1px solid var(--mt-border)',
       }}>
         <span style={{ fontSize: 12, fontWeight: 600 }}>{row.subject_name}</span>
-        {self && <span style={{ fontSize: 9, color: 'var(--mt-accent)', fontWeight: 600 }}>（自己）</span>}
+        {self && <span style={{ fontSize: 9, color: 'var(--mt-accent)', fontWeight: 600 }}>{t('belief.self')}</span>}
         <span style={{ fontSize: 9, color: 'var(--mt-text-faint)', marginLeft: 'auto' }}>
-          认知截至 t{row.as_of_tick} · {relRows.length} 条关系
+          {t('belief.cognitionAsOf', { tick: row.as_of_tick, count: relRows.length })}
         </span>
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
         <thead>
           <tr style={{ color: 'var(--mt-text-faint)' }}>
-            <th style={cellHead}>属性</th>
-            <th style={cellHead}>TA 以为</th>
-            <th style={cellHead}>真相</th>
+            <th style={cellHead}>{t('belief.colProperty')}</th>
+            <th style={cellHead}>{t('belief.colBelieved')}</th>
+            <th style={cellHead}>{t('belief.colTruth')}</th>
           </tr>
         </thead>
         <tbody>
@@ -200,13 +203,13 @@ function SubjectCard({ row, self }: { row: BeliefRow; self: boolean }) {
             );
           })}
           {keys.length === 0 && (
-            <tr><td colSpan={3} style={{ ...cell, color: 'var(--mt-text-faint)' }}>（无可对照属性）</td></tr>
+            <tr><td colSpan={3} style={{ ...cell, color: 'var(--mt-text-faint)' }}>{t('belief.noProps')}</td></tr>
           )}
         </tbody>
       </table>
       {relRows.length > 0 && (
         <div style={{ padding: '6px 9px', borderTop: '1px solid var(--mt-border)', background: '#fafafa' }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--mt-text-muted)', marginBottom: 4 }}>关系</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--mt-text-muted)', marginBottom: 4 }}>{t('belief.relations')}</div>
           {relRows.map(({ key, believed, truth, diff }) => {
             const st = DIFF_STYLE[diff];
             return (
@@ -216,7 +219,7 @@ function SubjectCard({ row, self }: { row: BeliefRow; self: boolean }) {
                 </span>
                 {diff !== 'match' && truth?.label && (
                   <span style={{ color: 'var(--mt-text-muted)', marginLeft: 6 }}>
-                    → 真相：{truth.label}
+                    {t('belief.truthArrow', { label: truth.label })}
                   </span>
                 )}
               </div>

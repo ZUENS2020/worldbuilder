@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../stores/appStore';
 import { ENTITY_CONFIG, RELATION_CONFIG, TAG_COLORS, getRelationConfig } from '../../types';
 import type { EntityType, RelationType } from '../../types';
@@ -14,6 +15,7 @@ import { ImeInput } from '../common/ImeInput';
 const BUILTIN_RELATION_TYPES = Object.keys(RELATION_CONFIG) as RelationType[];
 
 export default function Inspector() {
+  const { t } = useTranslation();
   const {
     selectedEntityId, selectedEntityIds, setSelectedEntities, entities, relations, updateEntity, removeEntity,
     executeTransform, addRelation, removeRelation, focusOnEntity,
@@ -23,6 +25,7 @@ export default function Inspector() {
 
   const [aiLoading, setAiLoading] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiError, setAiError] = useState(false);
   const [editingField, setEditingField] = useState<string | null>(null);
   // Long string fields render as Markdown by default; toggled here to edit inline.
   const [inlineEditFields, setInlineEditFields] = useState<Set<string>>(new Set());
@@ -68,8 +71,8 @@ export default function Inspector() {
   const tabBar = (showBack = false) => (
     <div className="mt-panel-title" style={{ justifyContent: 'space-between', gap: 6 }}>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        {tabBtn('details', '🔎 详情')}
-        {tabBtn('transform', '🕸️ Transform')}
+        {tabBtn('details', t('inspector.tabDetails'))}
+        {tabBtn('transform', t('inspector.tabTransform'))}
       </div>
       {showBack && (
         <button
@@ -77,9 +80,9 @@ export default function Inspector() {
           className="mt-btn"
           style={{ fontSize: 10, padding: '1px 8px', height: 20, border: '1px solid var(--mt-border)', color: 'var(--mt-text-muted)' }}
           onClick={() => setInspectorTab('details')}
-          title="返回详情 (Esc)"
+          title={t('inspector.backTip')}
         >
-          ← 详情 · Esc
+          {t('inspector.back')}
         </button>
       )}
     </div>
@@ -102,10 +105,10 @@ export default function Inspector() {
         {tabBar()}
         <div className="mt-panel-body" style={{ padding: '12px' }}>
           <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: 'var(--mt-accent-dark)' }}>
-            已选中 {multiSelected.length} 个实体
+            {t('inspector.multiSelected', { count: multiSelected.length })}
           </div>
           <div style={{ fontSize: 11, color: 'var(--mt-text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
-            点击列表项查看单个实体详情；右键节点可运行 Transform（以主选节点为准）。
+            {t('inspector.multiHint')}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: '60vh', overflowY: 'auto' }}>
             {multiSelected.map((e) => {
@@ -124,7 +127,7 @@ export default function Inspector() {
                 >
                   <span style={{ fontSize: 14 }}>{cfg.icon}</span>
                   <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
-                  <span style={{ fontSize: 10, color: cfg.color }}>{cfg.label}</span>
+                  <span style={{ fontSize: 10, color: cfg.color }}>{t(cfg.label)}</span>
                 </button>
               );
             })}
@@ -141,8 +144,8 @@ export default function Inspector() {
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--mt-text-muted)', fontSize: 12, textAlign: 'center', padding: 16 }}>
           <div>
             <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.5 }}>🔍</div>
-            选择一个实体查看属性<br />
-            <span style={{ fontSize: 11 }}>使用左上角框选工具多选 · 右键节点打开 Transform</span>
+            {t('inspector.emptyTitle')}<br />
+            <span style={{ fontSize: 11 }}>{t('inspector.emptyHint')}</span>
           </div>
         </div>
       </div>
@@ -161,24 +164,26 @@ export default function Inspector() {
     updateEntity(entity.id, { name: trimmed });
   };
 
-  const handleDelete = () => { if (confirm(`确定删除 ${entity.name}？`)) removeEntity(entity.id); };
+  const handleDelete = () => { if (confirm(t('inspector.deleteConfirm', { name: entity.name }))) removeEntity(entity.id); };
 
   const handleAITransform = async (type: string) => {
     setAiLoading(type);
     setAiResult(null);
+    setAiError(false);
     try {
       const result = await executeTransform(entity.id, type);
       if (result) setAiResult(result.message);
     } catch (e: any) {
-      setAiResult(`错误: ${e.message}`);
+      setAiResult(t('inspector.errorPrefix', { message: e.message }));
+      setAiError(true);
     }
     setAiLoading(null);
   };
 
   const handleAddProperty = () => {
-    const key = prompt('属性名:');
+    const key = prompt(t('inspector.propNamePrompt'));
     if (!key || key === '_property_order' || key === 'name' || key === 'label') return;
-    const value = prompt('属性值:');
+    const value = prompt(t('inspector.propValuePrompt'));
     if (value === null) return;
     const entries = getOrderedPropertyEntries(entity.properties);
     entries.push([key, value]);
@@ -210,9 +215,9 @@ export default function Inspector() {
   const otherEntities = entities.filter((e) => e.id !== entity.id);
 
   const aiActions = [
-    { id: 'ai_infer', label: '🔮 推断潜在关联', busy: '推断中...' },
-    { id: 'ai_conflict', label: '⚠️ 检测矛盾', busy: '检测中...' },
-    { id: 'ai_backstory', label: '✨ 生成背景故事', busy: '生成中...' },
+    { id: 'ai_infer', label: t('inspector.aiInfer'), busy: t('inspector.aiInferBusy') },
+    { id: 'ai_conflict', label: t('inspector.aiConflict'), busy: t('inspector.aiConflictBusy') },
+    { id: 'ai_backstory', label: t('inspector.aiBackstory'), busy: t('inspector.aiBackstoryBusy') },
   ];
 
   return (
@@ -234,7 +239,7 @@ export default function Inspector() {
             <ImeInput
               value={entity.name}
               onCommit={handleNameChange}
-              title="实体名称（失焦或 Enter 保存）"
+              title={t('inspector.nameTip')}
               style={{
                 width: '100%', fontWeight: 600, fontSize: 14,
                 background: 'transparent', border: '1px solid transparent', borderRadius: 3,
@@ -249,14 +254,14 @@ export default function Inspector() {
                 e.currentTarget.style.borderColor = 'transparent';
               }}
             />
-            <div style={{ color: config.color, fontSize: 11, paddingLeft: 4 }}>{config.label}</div>
+            <div style={{ color: config.color, fontSize: 11, paddingLeft: 4 }}>{t(config.label)}</div>
           </div>
-          <button className="mt-btn" onClick={handleDelete} title="删除" style={{ color: '#c0392b' }}>🗑️</button>
+          <button className="mt-btn" onClick={handleDelete} title={t('inspector.deleteTip')} style={{ color: '#c0392b' }}>🗑️</button>
         </div>
 
         {/* AI actions */}
         <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--mt-border-soft)' }}>
-          <div style={sectionLabel}>🤖 AI 操作</div>
+          <div style={sectionLabel}>{t('inspector.aiSection')}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {aiActions.map((a) => (
               <button
@@ -274,9 +279,9 @@ export default function Inspector() {
             <div
               style={{
                 marginTop: 8, padding: '6px 8px', borderRadius: 4, fontSize: 11,
-                background: aiResult.startsWith('错误') ? '#fdecea' : '#eafaf0',
-                color: aiResult.startsWith('错误') ? '#c0392b' : '#1f7a3d',
-                border: `1px solid ${aiResult.startsWith('错误') ? '#f3c6c0' : '#bfe6cd'}`,
+                background: aiError ? '#fdecea' : '#eafaf0',
+                color: aiError ? '#c0392b' : '#1f7a3d',
+                border: `1px solid ${aiError ? '#f3c6c0' : '#bfe6cd'}`,
               }}
             >
               <Markdown style={{ fontSize: 11, color: 'inherit' }}>{aiResult}</Markdown>
@@ -309,12 +314,12 @@ export default function Inspector() {
         {/* Relations */}
         <div style={{ padding: '10px 12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <span style={sectionLabel}>关系 Links ({entityRelations.length})</span>
-            <button className="mt-btn" onClick={() => { setShowAddRel(true); setNewRelTargetId(''); setShowCustomType(false); }} style={{ fontSize: 10, padding: '1px 6px', border: '1px solid var(--mt-border)' }}>＋ 添加</button>
+            <span style={sectionLabel}>{t('inspector.linksTitle', { count: entityRelations.length })}</span>
+            <button className="mt-btn" onClick={() => { setShowAddRel(true); setNewRelTargetId(''); setShowCustomType(false); }} style={{ fontSize: 10, padding: '1px 6px', border: '1px solid var(--mt-border)' }}>{t('inspector.add')}</button>
           </div>
 
           {entityRelations.length === 0 && !showAddRel && (
-            <div style={{ color: 'var(--mt-text-faint)', fontSize: 11 }}>（暂无关系）</div>
+            <div style={{ color: 'var(--mt-text-faint)', fontSize: 11 }}>{t('inspector.noLinks')}</div>
           )}
 
           {entityRelations.map((r) => {
@@ -326,7 +331,7 @@ export default function Inspector() {
               <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0', fontSize: 12, borderBottom: '1px solid var(--mt-border-soft)' }}>
                 <span style={{ color: 'var(--mt-text-muted)', fontWeight: 700, fontSize: 11 }}>{isSource ? '→' : '←'}</span>
                 <span style={{ color: relConfig.color, fontSize: 10, background: `${relConfig.color}1e`, padding: '1px 6px', borderRadius: 3, border: `1px solid ${relConfig.color}40` }}>
-                  {relConfig.label}
+                  {t(relConfig.label)}
                 </span>
                 <span
                   onClick={() => focusOnEntity((isSource ? r.target_id : r.source_id))}
@@ -334,7 +339,7 @@ export default function Inspector() {
                     flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     cursor: 'pointer', color: otherConfig?.color || 'var(--mt-text)',
                   }}
-                  title={`在图中定位「${other?.name || '?'}」`}
+                  title={t('inspector.locateTip', { name: other?.name || '?' })}
                 >
                   {otherConfig?.icon} {other?.name || '?'}
                 </span>
@@ -344,7 +349,7 @@ export default function Inspector() {
                   style={{ fontSize: 10, color: '#ccc', cursor: 'pointer', padding: '0 2px', flexShrink: 0 }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#c0392b'; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#ccc'; }}
-                  title="删除关系"
+                  title={t('inspector.deleteLinkTip')}
                 >
                   ✕
                 </span>
@@ -360,13 +365,13 @@ export default function Inspector() {
             }}>
               {/* Target entity */}
               <div style={{ marginBottom: 6 }}>
-                <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 3 }}>目标实体</div>
+                <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 3 }}>{t('inspector.targetEntity')}</div>
                 <select
                   value={newRelTargetId}
                   onChange={(e) => setNewRelTargetId(e.target.value)}
                   style={{ ...fieldStyle, padding: '3px 6px' }}
                 >
-                  <option value="">选择实体...</option>
+                  <option value="">{t('inspector.selectEntity')}</option>
                   {otherEntities.map((e) => {
                     const ec = ENTITY_CONFIG[e.type as EntityType];
                     return <option key={e.id} value={e.id}>{ec.icon} {e.name}</option>;
@@ -376,20 +381,20 @@ export default function Inspector() {
 
               {/* Relation type */}
               <div style={{ marginBottom: 6 }}>
-                <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 3 }}>关系类型</div>
+                <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 3 }}>{t('inspector.relationType')}</div>
                 <select
                   value={newRelType}
                   onChange={(e) => setNewRelType(e.target.value)}
                   style={{ ...fieldStyle, padding: '3px 6px' }}
                 >
-                  <optgroup label="内置类型">
+                  <optgroup label={t('inspector.builtinTypes')}>
                     {BUILTIN_RELATION_TYPES.map((rt) => {
                       const rc = RELATION_CONFIG[rt];
-                      return <option key={rt} value={rt}>{rc.label}</option>;
+                      return <option key={rt} value={rt}>{t(rc.label)}</option>;
                     })}
                   </optgroup>
                   {customRelationTypes.length > 0 && (
-                    <optgroup label="自定义类型">
+                    <optgroup label={t('inspector.customTypes')}>
                       {customRelationTypes.map((ct) => (
                         <option key={ct.id} value={ct.id}>{ct.name}</option>
                       ))}
@@ -402,7 +407,7 @@ export default function Inspector() {
                   onClick={() => setShowCustomType((v) => !v)}
                   style={{ fontSize: 9, padding: '1px 6px', marginTop: 4, border: '1px solid var(--mt-border)', color: 'var(--mt-accent)' }}
                 >
-                  {showCustomType ? '▲ 收起' : '✏️ 自定义新类型...'}
+                  {showCustomType ? t('inspector.collapse') : t('inspector.customNewType')}
                 </button>
               </div>
 
@@ -412,11 +417,11 @@ export default function Inspector() {
                   padding: 6, marginBottom: 6, borderRadius: 3,
                   border: '1px dashed var(--mt-accent)', background: '#fff',
                 }}>
-                  <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 4, fontWeight: 600 }}>新建自定义关系类型</div>
+                  <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 4, fontWeight: 600 }}>{t('inspector.newCustomType')}</div>
                   <input
                     value={customTypeName}
                     onChange={(e) => setCustomTypeName(e.target.value)}
-                    placeholder="类型名称（如：师承）"
+                    placeholder={t('inspector.typeNamePlaceholder')}
                     style={{ ...fieldStyle, marginBottom: 4, padding: '3px 6px', fontSize: 11 }}
                   />
                   {/* Color selection */}
@@ -442,7 +447,7 @@ export default function Inspector() {
                         onClick={() => setCustomTypeStyle(s)}
                         style={{ fontSize: 9, padding: '2px 6px', border: `1px solid ${customTypeStyle === s ? 'var(--mt-accent)' : 'var(--mt-border)'}` }}
                       >
-                        {s === 'solid' ? '━━ 实线' : s === 'dashed' ? '┅┅ 虚线' : '···· 点线'}
+                        {s === 'solid' ? t('inspector.lineSolid') : s === 'dashed' ? t('inspector.lineDashed') : t('inspector.lineDotted')}
                       </button>
                     ))}
                   </div>
@@ -452,28 +457,28 @@ export default function Inspector() {
                     disabled={!customTypeName.trim()}
                     style={{ fontSize: 10, padding: '2px 8px', border: '1px solid var(--mt-accent)', fontWeight: 600 }}
                   >
-                    创建并选用
+                    {t('inspector.createAndUse')}
                   </button>
                 </div>
               )}
 
               {/* Direction */}
               <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 3 }}>方向</div>
+                <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 3 }}>{t('inspector.direction')}</div>
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button
                     className={`mt-btn${newRelDirection === 'outgoing' ? ' active' : ''}`}
                     onClick={() => setNewRelDirection('outgoing')}
                     style={{ fontSize: 10, padding: '2px 8px', border: `1px solid ${newRelDirection === 'outgoing' ? 'var(--mt-accent)' : 'var(--mt-border)'}` }}
                   >
-                    {entity.name} → 目标
+                    {entity.name} → {t('inspector.target')}
                   </button>
                   <button
                     className={`mt-btn${newRelDirection === 'incoming' ? ' active' : ''}`}
                     onClick={() => setNewRelDirection('incoming')}
                     style={{ fontSize: 10, padding: '2px 8px', border: `1px solid ${newRelDirection === 'incoming' ? 'var(--mt-accent)' : 'var(--mt-border)'}` }}
                   >
-                    目标 → {entity.name}
+                    {t('inspector.target')} → {entity.name}
                   </button>
                 </div>
               </div>
@@ -486,14 +491,14 @@ export default function Inspector() {
                   disabled={!newRelTargetId || addingRel}
                   style={{ flex: 1, justifyContent: 'center', fontWeight: 600, fontSize: 11, border: '1px solid var(--mt-accent)' }}
                 >
-                  {addingRel ? '添加中...' : '确认添加'}
+                  {addingRel ? t('inspector.adding') : t('inspector.confirmAdd')}
                 </button>
                 <button
                   className="mt-btn"
                   onClick={() => { setShowAddRel(false); setShowCustomType(false); }}
                   style={{ fontSize: 11, border: '1px solid var(--mt-border)' }}
                 >
-                  取消
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>
@@ -502,20 +507,20 @@ export default function Inspector() {
           {/* Custom relation types management */}
           {customRelationTypes.length > 0 && (
             <div style={{ marginTop: 10 }}>
-              <div style={sectionLabel}>自定义关系类型</div>
+              <div style={sectionLabel}>{t('inspector.customTypesHeading')}</div>
               {customRelationTypes.map((ct) => (
                 <div key={ct.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 11 }}>
                   <span style={{ width: 10, height: 10, borderRadius: '50%', background: ct.color, flexShrink: 0 }} />
                   <span style={{ flex: 1 }}>{ct.name}</span>
                   <span style={{ fontSize: 9, color: 'var(--mt-text-faint)' }}>
-                    {ct.style === 'solid' ? '实线' : ct.style === 'dashed' ? '虚线' : '点线'}
+                    {ct.style === 'solid' ? t('inspector.styleSolid') : ct.style === 'dashed' ? t('inspector.styleDashed') : t('inspector.styleDotted')}
                   </span>
                   <span
                     onClick={() => removeCustomRelationType(ct.id)}
                     style={{ fontSize: 10, color: '#ccc', cursor: 'pointer' }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#c0392b'; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#ccc'; }}
-                    title="删除自定义类型"
+                    title={t('inspector.deleteCustomType')}
                   >
                     ✕
                   </span>

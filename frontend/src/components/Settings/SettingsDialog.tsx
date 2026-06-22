@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../stores/appStore';
 import { api } from '../../services/api';
+import { SUPPORTED_LANGS } from '../../i18n';
 import {
   DEFAULT_GRAPH_HOPS,
   getGraphHops,
@@ -12,20 +14,23 @@ interface SettingsDialogProps {
   onClose: () => void;
 }
 
-const HOP_FIELDS: { key: keyof GraphHopSettings; label: string; hint: string }[] = [
-  { key: 'transform_expand', label: 'Transform 展开', hint: '展开关系人/事件等图谱 Transform 的 BFS 深度' },
-  { key: 'transform_enemy', label: '敌对阵营搜索', hint: '「查找敌对阵营」Transform 的搜索深度' },
-  { key: 'ai_context', label: 'AI 关系上下文', hint: 'AI 推断、矛盾检测、背景生成时纳入的关系范围' },
-  { key: 'context_injection', label: 'ST 上下文注入', hint: 'SillyTavern 插件查询图谱上下文时的 BFS 深度' },
-  { key: 'isolate_subgraph', label: '子图隔离', hint: '探索模式「只看此子图」的 BFS 深度' },
+const HOP_KEYS: (keyof GraphHopSettings)[] = [
+  'transform_expand',
+  'transform_enemy',
+  'ai_context',
+  'context_injection',
+  'isolate_subgraph',
 ];
 
 export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
+  const { t, i18n } = useTranslation();
   const { project, setProject } = useAppStore();
   const [endpoint, setEndpoint] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
   const [graphHops, setGraphHops] = useState<GraphHopSettings>({ ...DEFAULT_GRAPH_HOPS });
+  // 叙事语言：'' = 跟随界面，否则固定为某种语言（透传给后端推演引擎）
+  const [narrativeLang, setNarrativeLang] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -34,11 +39,16 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       setEndpoint(s.ai_endpoint || '');
       setApiKey(s.ai_api_key ? '••••••••' : '');
       setModel(s.ai_model || '');
+      setNarrativeLang(s.narrative_language || '');
       setGraphHops(getGraphHops(project));
     }
   }, [project, open]);
 
   if (!open) return null;
+
+  const changeUiLanguage = (lng: string) => {
+    i18n.changeLanguage(lng);
+  };
 
   const handleSave = async () => {
     if (!project) return;
@@ -50,6 +60,8 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       if (apiKey && apiKey !== '••••••••') settings.ai_api_key = apiKey;
       if (model) settings.ai_model = model;
       else delete settings.ai_model;
+      if (narrativeLang) settings.narrative_language = narrativeLang;
+      else delete settings.narrative_language;
       const updated = await api.updateProject(project.id, { settings });
       setProject(updated);
       onClose();
@@ -87,15 +99,58 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--mt-border)', fontWeight: 600, fontSize: 14 }}>
-          ⚙️ 项目设置
+          {t('settings.title')}
         </div>
         <div style={{ padding: '16px 18px' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--mt-text-muted)', marginBottom: 10, letterSpacing: '0.04em' }}>
-            AI 配置
+            {t('settings.interfaceSection')}
+          </div>
+          <label style={{ display: 'block', marginBottom: 12 }} title={t('settings.languageHint')}>
+            <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>
+              {t('settings.language')}
+            </span>
+            <select
+              value={SUPPORTED_LANGS.includes(i18n.language as any) ? i18n.language : 'zh'}
+              onChange={(e) => changeUiLanguage(e.target.value)}
+              style={{
+                width: '100%', padding: '6px 10px', fontSize: 12,
+                background: 'var(--mt-window)', border: '1px solid var(--mt-border)',
+                borderRadius: 4, color: 'var(--mt-text)', outline: 'none',
+              }}
+            >
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <label style={{ display: 'block', marginBottom: 12 }} title={t('settings.narrativeLanguageHint')}>
+            <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>
+              {t('settings.narrativeLanguage')}
+            </span>
+            <select
+              value={narrativeLang}
+              onChange={(e) => setNarrativeLang(e.target.value)}
+              style={{
+                width: '100%', padding: '6px 10px', fontSize: 12,
+                background: 'var(--mt-window)', border: '1px solid var(--mt-border)',
+                borderRadius: 4, color: 'var(--mt-text)', outline: 'none',
+              }}
+            >
+              <option value="">{t('settings.narrativeFollowUi')}</option>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+
+          <div style={{
+            fontSize: 11, fontWeight: 700, color: 'var(--mt-text-muted)',
+            margin: '18px 0 10px', letterSpacing: '0.04em',
+            borderTop: '1px solid var(--mt-border-soft)', paddingTop: 14,
+          }}>
+            {t('settings.aiConfig')}
           </div>
           <label style={{ display: 'block', marginBottom: 12 }}>
             <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>
-              AI Endpoint（留空用默认 OpenRouter）
+              {t('settings.aiEndpoint')}
             </span>
             <input
               value={endpoint}
@@ -110,7 +165,7 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           </label>
           <label style={{ display: 'block', marginBottom: 12 }}>
             <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>
-              API Key（留空用环境变量）
+              {t('settings.apiKey')}
             </span>
             <input
               type="password"
@@ -126,7 +181,7 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           </label>
           <label style={{ display: 'block', marginBottom: 4 }}>
             <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>
-              模型（留空用默认 deepseek/deepseek-v4-flash）
+              {t('settings.model')}
             </span>
             <input
               value={model}
@@ -145,12 +200,14 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             margin: '18px 0 10px', letterSpacing: '0.04em',
             borderTop: '1px solid var(--mt-border-soft)', paddingTop: 14,
           }}>
-            图谱跳数（1–5 跳 BFS）
+            {t('settings.graphHops')}
           </div>
-          {HOP_FIELDS.map(({ key, label, hint }) => (
+          {HOP_KEYS.map((key) => {
+            const hint = t(`settings.hops.${key}_hint`);
+            return (
             <label key={key} style={{ display: 'block', marginBottom: 10 }} title={hint}>
               <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>
-                {label}
+                {t(`settings.hops.${key}`)}
               </span>
               <input
                 type="number"
@@ -166,13 +223,14 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               />
               <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--mt-text-muted)' }}>{hint}</span>
             </label>
-          ))}
+            );
+          })}
         </div>
         <div style={{ padding: '10px 18px', borderTop: '1px solid var(--mt-border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="mt-btn" onClick={onClose} style={{ border: '1px solid var(--mt-border)' }}>取消</button>
+          <button className="mt-btn" onClick={onClose} style={{ border: '1px solid var(--mt-border)' }}>{t('common.cancel')}</button>
           <button className="mt-btn active" onClick={handleSave} disabled={saving}
             style={{ fontWeight: 600, border: '1px solid var(--mt-accent)' }}>
-            {saving ? '保存中...' : '保存'}
+            {saving ? t('common.saving') : t('common.save')}
           </button>
         </div>
       </div>

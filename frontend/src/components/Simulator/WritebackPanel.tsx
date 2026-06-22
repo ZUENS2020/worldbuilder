@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSimStore } from '../../stores/simStore';
 import { useAppStore } from '../../stores/appStore';
 import { api } from '../../services/api';
@@ -17,6 +18,7 @@ interface WritebackItem {
 }
 
 export default function WritebackPanel() {
+  const { t } = useTranslation();
   const projectId = useAppStore((s) => s.project?.id);
   const { sim, writebackItems, writebackPreview, loadWritebackQueue, previewWriteback, applyWriteback, updateWritebackConfig } = useSimStore();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -105,7 +107,7 @@ export default function WritebackPanel() {
   if (!sim) {
     return (
       <div style={{ padding: 16, fontSize: 12, color: 'var(--mt-text-muted)' }}>
-        请先选择或新建一个模拟。
+        {t('writeback.noSim')}
       </div>
     );
   }
@@ -115,43 +117,43 @@ export default function WritebackPanel() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontSize: 12 }}>
       <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--mt-border)', background: 'var(--mt-panel-header)' }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>回写触发</div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>{t('writeback.triggerTitle')}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <label>
-            <input type="radio" checked={trigger === 'manual'} onChange={() => setTrigger('manual')} /> 手动
+            <input type="radio" checked={trigger === 'manual'} onChange={() => setTrigger('manual')} /> {t('writeback.manual')}
           </label>
           <label>
-            <input type="radio" checked={trigger === 'every_n_rounds'} onChange={() => setTrigger('every_n_rounds')} /> 每
+            <input type="radio" checked={trigger === 'every_n_rounds'} onChange={() => setTrigger('every_n_rounds')} /> {t('writeback.every')}
             <input
               type="number" min={1} max={20} value={everyN}
               onChange={(e) => setEveryN(parseInt(e.target.value) || 3)}
               style={{ width: 40, margin: '0 4px' }}
               disabled={trigger !== 'every_n_rounds'}
             />
-            轮
+            {t('writeback.rounds')}
           </label>
           <label>
-            <input type="radio" checked={trigger === 'auto_llm'} onChange={() => setTrigger('auto_llm')} /> 自动 LLM tick
+            <input type="radio" checked={trigger === 'auto_llm'} onChange={() => setTrigger('auto_llm')} /> {t('writeback.autoLlm')}
           </label>
           {trigger !== 'auto_llm' && (
             <select value={cfg.writeback_depth || 'mechanical'} onChange={(e) => setCfgDepth(e.target.value)}>
-              <option value="mechanical">机械（记忆+belief）</option>
-              <option value="llm_oracle">LLM Oracle</option>
+              <option value="mechanical">{t('writeback.depthMechanical')}</option>
+              <option value="llm_oracle">{t('writeback.depthLlmOracle')}</option>
             </select>
           )}
         </div>
         <p style={{ margin: '8px 0 0', color: 'var(--mt-text-muted)', fontSize: 11 }}>
-          ST 插件入队后在此审阅。详细预览与执行回写请在勾选条目后操作。
+          {t('writeback.hint')}
         </p>
       </div>
 
       <div style={{ padding: '8px 12px', display: 'flex', gap: 8, borderBottom: '1px solid var(--mt-border)' }}>
         <select value={depth} onChange={(e) => setDepth(e.target.value as 'mechanical' | 'llm_oracle')} style={{ fontSize: 11 }}>
-          <option value="mechanical">预览/执行：机械</option>
-          <option value="llm_oracle">预览/执行：LLM Oracle</option>
+          <option value="mechanical">{t('writeback.previewMechanical')}</option>
+          <option value="llm_oracle">{t('writeback.previewLlmOracle')}</option>
         </select>
-        <button className="mt-btn" disabled={!ids.length || busy} onClick={onPreview}>预览影响</button>
-        <button className="mt-btn active" disabled={!ids.length || busy} onClick={onApply}>执行回写</button>
+        <button className="mt-btn" disabled={!ids.length || busy} onClick={onPreview}>{t('writeback.previewBtn')}</button>
+        <button className="mt-btn active" disabled={!ids.length || busy} onClick={onApply}>{t('writeback.applyBtn')}</button>
       </div>
 
       {writebackPreview && (
@@ -165,7 +167,7 @@ export default function WritebackPanel() {
 
       <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
         {items.length === 0 ? (
-          <div style={{ color: 'var(--mt-text-muted)', padding: 12 }}>暂无待回写条目（在 ST 中启用 writeback 并绑定本模拟）</div>
+          <div style={{ color: 'var(--mt-text-muted)', padding: 12 }}>{t('writeback.emptyQueue')}</div>
         ) : (
           items.map((row) => (
             <div
@@ -187,9 +189,9 @@ export default function WritebackPanel() {
               </div>
               {expanded.has(row.id) && (
                 <div style={{ padding: '0 8px 8px', fontSize: 11 }}>
-                  <div style={{ marginBottom: 4 }}><b>用户</b>：{row.user_message || '（空）'}</div>
-                  <div style={{ marginBottom: 8 }}><b>角色</b>：{row.assistant_message || '（空）'}</div>
-                  <button className="mt-btn" style={{ fontSize: 10 }} onClick={() => onDiscard(row.id)}>丢弃</button>
+                  <div style={{ marginBottom: 4 }}><b>{t('writeback.user')}</b>：{row.user_message || t('writeback.blank')}</div>
+                  <div style={{ marginBottom: 8 }}><b>{t('writeback.character')}</b>：{row.assistant_message || t('writeback.blank')}</div>
+                  <button className="mt-btn" style={{ fontSize: 10 }} onClick={() => onDiscard(row.id)}>{t('writeback.discard')}</button>
                 </div>
               )}
             </div>

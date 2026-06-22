@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { useReactFlow, type Node, type ReactFlowInstance } from '@xyflow/react';
+import { useTranslation } from 'react-i18next';
 import type { Entity, EntityType } from '../../types';
 import { ENTITY_CONFIG } from '../../types';
 import { normalizeRect, pointInPolygon, pointInRect } from '../../utils/selection';
@@ -214,6 +215,7 @@ interface SelectionToolPanelProps {
 export function SelectionToolPanel({
   tool, onChange, selectedCount, canUndo, canRedo, onUndo, onRedo,
 }: SelectionToolPanelProps) {
+  const { t } = useTranslation();
   const btn = (id: SelectionTool, icon: string, label: string, title: string) => (
     <button
       type="button"
@@ -244,15 +246,15 @@ export function SelectionToolPanel({
         boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
       }}
     >
-      {btn('pointer', '↖', '选择', '点击选中；多选后可整体拖动')}
-      {btn('rect', '▭', '矩形', '拖拽矩形框选，松开后只高亮节点')}
-      {btn('lasso', '✎', '套索', '拖拽闭合路径框选，松开后只高亮节点')}
+      {btn('pointer', '↖', t('selection.pointer'), t('selection.pointerTip'))}
+      {btn('rect', '▭', t('selection.rect'), t('selection.rectTip'))}
+      {btn('lasso', '✎', t('selection.lasso'), t('selection.lassoTip'))}
       <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--mt-border-soft)', margin: '0 2px' }} />
       <button
         type="button"
         className="mt-btn"
         style={{ fontSize: 11, padding: '3px 8px', border: '1px solid var(--mt-border)' }}
-        title="撤销节点位置 (⌘/Ctrl+Z)"
+        title={t('selection.undo')}
         disabled={!canUndo}
         onClick={onUndo}
       >
@@ -262,7 +264,7 @@ export function SelectionToolPanel({
         type="button"
         className="mt-btn"
         style={{ fontSize: 11, padding: '3px 8px', border: '1px solid var(--mt-border)' }}
-        title="重做节点位置 (⌘/Ctrl+Shift+Z)"
+        title={t('selection.redo')}
         disabled={!canRedo}
         onClick={onRedo}
       >
@@ -270,7 +272,7 @@ export function SelectionToolPanel({
       </button>
       {selectedCount > 1 && (
         <span style={{ fontSize: 10, color: 'var(--mt-accent-dark)', marginLeft: 2 }}>
-          已选 {selectedCount}
+          {t('selection.selected', { count: selectedCount })}
         </span>
       )}
     </div>

@@ -20,7 +20,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import (
-    Entity, Relation, Simulation, SimTick, WorldEntry, AgentMemory,
+    Entity, Relation, Project, Simulation, SimTick, WorldEntry, AgentMemory,
 )
 from app.graph.engine import graph_engine
 from app.services import ai_service
@@ -67,6 +67,19 @@ DEFAULT_CONFIG = {
 
 def _cfg(sim: Simulation, key: str):
     return (sim.config or {}).get(key, DEFAULT_CONFIG.get(key))
+
+
+async def ai_passthrough_config(db: AsyncSession, sim: Simulation) -> dict:
+    """Build the AI-call config for a sim: a shallow copy of sim.config with the
+    project's narrative_language folded in (without mutating/persisting sim.config),
+    so ai_service.call_ai can narrate in the project's chosen language."""
+    config = {**(sim.config or {})}
+    proj = await db.get(Project, sim.project_id)
+    if proj and isinstance(proj.settings, dict):
+        nl = proj.settings.get("narrative_language")
+        if nl:
+            config["narrative_language"] = nl
+    return config
 
 
 async def _release_db_lock(db: AsyncSession, *objs) -> None:
@@ -1505,7 +1518,9 @@ async def run_tick(db: AsyncSession, sim: Simulation) -> SimTick:
     """Advance the simulation one tick and persist a SimTick row."""
     t0 = time.monotonic()
     tick = (sim.current_tick or 0) + 1
-    config = sim.config or {}
+    # AI passthrough config. Sim knobs are still read via _cfg(sim, ...); this
+    # carries what ai_service.call_ai resolves, incl. the project's narrative lang.
+    config = await ai_passthrough_config(db, sim)
     recent_k = int(_cfg(sim, "memory_recent_k") or 8)
     threshold = int(_cfg(sim, "memory_compact_threshold") or 12)
     allow_new = bool(_cfg(sim, "allow_new_entities"))

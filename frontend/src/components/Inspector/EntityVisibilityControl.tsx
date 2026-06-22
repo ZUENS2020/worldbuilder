@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ENTITY_CONFIG } from '../../types';
 import type { EntityType } from '../../types';
 import { VISIBILITY_KEY } from '../../utils/propertyOrder';
@@ -26,6 +27,7 @@ const OPS = ['eq', 'ne', 'contains', 'gt', 'lt', 'gte', 'lte', 'exists'];
 export default function EntityVisibilityControl({
   entity, entities, tags, updateEntity, sectionLabel, fieldStyle,
 }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const meta = ((entity.properties || {})[VISIBILITY_KEY] as VisMeta) || { mode: 'public' };
   const factions = entities.filter((e) => e.type === 'faction');
@@ -44,21 +46,21 @@ export default function EntityVisibilityControl({
   };
 
   const summary = meta.mode === 'public'
-    ? '🌐 公开（所有人可见）'
+    ? t('visibility.publicSummary')
     : meta.mode === 'groups'
-      ? `👥 群体（${(meta.groups ?? []).length} 个）`
-      : '🧩 条件';
+      ? t('visibility.groupsSummary', { count: (meta.groups ?? []).length })
+      : t('visibility.predicateSummary');
 
   return (
     <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--mt-border-soft)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={sectionLabel}>👁 实体可见度</span>
+        <span style={sectionLabel}>{t('visibility.title')}</span>
         <button
           className="mt-btn"
           onClick={() => setOpen((v) => !v)}
           style={{ fontSize: 10, padding: '1px 6px', border: '1px solid var(--mt-border)' }}
         >
-          {open ? '▲ 收起' : '设置'}
+          {open ? t('visibility.collapse') : t('visibility.settings')}
         </button>
       </div>
       <div style={{ fontSize: 11, color: meta.mode === 'public' ? 'var(--mt-text-faint)' : 'var(--mt-accent)', marginTop: 3 }}>
@@ -79,7 +81,7 @@ export default function EntityVisibilityControl({
                     : m === 'groups' ? { mode: 'groups', groups: meta.groups ?? [] }
                     : { mode: 'predicate', predicate: meta.predicate ?? { key: '', op: 'eq', value: '' } })}
                 >
-                  {m === 'public' ? '🌐 公开' : m === 'groups' ? '👥 群体' : '🧩 条件'}
+                  {m === 'public' ? t('visibility.public') : m === 'groups' ? t('visibility.groups') : t('visibility.predicate')}
                 </button>
               );
             })}
@@ -88,7 +90,7 @@ export default function EntityVisibilityControl({
           {meta.mode === 'groups' && (
             <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--mt-border-soft)', borderRadius: 3, background: '#fff', padding: 5 }}>
               {factions.length > 0 && (
-                <div style={{ fontSize: 9, color: 'var(--mt-text-faint)', margin: '0 0 2px' }}>阵营</div>
+                <div style={{ fontSize: 9, color: 'var(--mt-text-faint)', margin: '0 0 2px' }}>{t('visibility.factions')}</div>
               )}
               {factions.map((f) => {
                 const checked = (meta.groups ?? []).includes(f.id);
@@ -101,7 +103,7 @@ export default function EntityVisibilityControl({
                 );
               })}
               {tags.length > 0 && (
-                <div style={{ fontSize: 9, color: 'var(--mt-text-faint)', margin: '4px 0 2px' }}>标签</div>
+                <div style={{ fontSize: 9, color: 'var(--mt-text-faint)', margin: '4px 0 2px' }}>{t('visibility.tags')}</div>
               )}
               {tags.map((t) => {
                 const checked = (meta.groups ?? []).includes(t.id);
@@ -113,7 +115,7 @@ export default function EntityVisibilityControl({
                 );
               })}
               {factions.length === 0 && tags.length === 0 && (
-                <div style={{ fontSize: 10, color: 'var(--mt-text-faint)' }}>（无阵营或标签可选）</div>
+                <div style={{ fontSize: 10, color: 'var(--mt-text-faint)' }}>{t('visibility.noGroups')}</div>
               )}
             </div>
           )}
@@ -121,10 +123,10 @@ export default function EntityVisibilityControl({
           {meta.mode === 'predicate' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div style={{ fontSize: 9, color: 'var(--mt-text-faint)' }}>
-                观察者满足条件才能看到此实体
+                {t('visibility.predicateHint')}
               </div>
               <input
-                placeholder="属性名（如 rank）"
+                placeholder={t('visibility.keyPlaceholder')}
                 value={meta.predicate?.key ?? ''}
                 onChange={(e) => setMeta({ mode: 'predicate', predicate: { ...(meta.predicate ?? { key: '', op: 'eq', value: '' }), key: e.target.value } })}
                 style={{ ...fieldStyle, padding: '3px 6px', fontSize: 11 }}
@@ -138,7 +140,7 @@ export default function EntityVisibilityControl({
                   {OPS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
                 <input
-                  placeholder="值"
+                  placeholder={t('visibility.valuePlaceholder')}
                   value={meta.predicate?.value ?? ''}
                   onChange={(e) => setMeta({ mode: 'predicate', predicate: { ...(meta.predicate ?? { key: '', op: 'eq', value: '' }), value: e.target.value } })}
                   style={{ ...fieldStyle, padding: '3px 6px', fontSize: 11, flex: 1 }}

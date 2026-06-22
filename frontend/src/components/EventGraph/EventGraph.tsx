@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ReactFlow,
   Background,
@@ -91,6 +92,7 @@ function buildEventData(
 }
 
 export default function EventGraph() {
+  const { t } = useTranslation();
   const {
     entities, relations, addRelation, setSelectedEntity,
     project, customRelationTypes, setInspectorTab, clearTransformHighlight,
@@ -230,11 +232,11 @@ export default function EventGraph() {
   const onConnect: OnConnect = useCallback(
     async (params: Connection) => {
       if (!project || !params.source || !params.target) return;
-      const relType = prompt('因果类型 (caused / followed_by):');
+      const relType = prompt(t('eventGraph.relTypePrompt'));
       if (!relType) return;
       await addRelation({ source_id: params.source, target_id: params.target, type: relType, weight: 0.7 });
     },
-    [project, addRelation],
+    [project, addRelation, t],
   );
 
   const onNodeClick: NodeMouseHandler = useCallback((_e, node) => setSelectedEntity(node.id), [setSelectedEntity]);
@@ -284,7 +286,7 @@ export default function EventGraph() {
             borderRadius: 4, padding: '4px 10px', fontSize: 11,
             color: 'var(--mt-text-muted)', boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
           }}>
-            ⚡ 事件因果脉络 · 拖拽连线创建因果链 · 右键展开参与者 · 顶部工具栏可整理布局
+            {t('eventGraph.hint')}
           </div>
         </Panel>
       </ReactFlow>

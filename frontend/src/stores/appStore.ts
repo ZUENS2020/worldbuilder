@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Entity, Relation, Project, TransformDef, TransformResult, Tag, CustomRelationType } from '../types';
 import { getGraphHops } from '../types';
 import { api } from '../services/api';
+import i18n from '../i18n';
 
 interface AICandidate {
   target_name: string;
@@ -534,7 +535,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     return {
       new_entities: mergedEntities.filter((e) => resultIds.has(e.id) && e.id !== entityId),
       new_relations: mergedRelations.filter((r) => relationIdSet.has(r.id)),
-      message: `已展开 ${resultIds.size - 1} 个关联实体（${transformList.length} 个 Transform）`,
+      message: i18n.t('store.revealMessage', { count: resultIds.size - 1, transforms: transformList.length }),
     };
   },
 

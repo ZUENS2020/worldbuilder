@@ -25,7 +25,41 @@ def _resolve_config(project_settings: dict | None = None) -> dict:
         "api_key": s.get("ai_api_key") or _ENV_KEY,
         "endpoint": s.get("ai_endpoint") or _ENV_ENDPOINT,
         "model": s.get("ai_model") or _ENV_MODEL,
+        "narrative_language": s.get("narrative_language") or "",
     }
+
+
+# Directive appended to the system prompt so the deduction engine emits its
+# human-readable output (narratives, summaries, event names, intuitions) in the
+# chosen language. JSON keys / enum values stay as specified — only the natural-
+# language *values* are localized. Empty narrative_language = no directive, i.e.
+# the prompts' own language (Chinese) is preserved (backward compatible).
+_LANG_DIRECTIVE = {
+    "en": (
+        "\n\nLANGUAGE: Write ALL natural-language output — every narrative, "
+        "summary, description, event/entity name, and intuition text — in fluent "
+        "English. Keep all JSON field keys and any enum/type values exactly as "
+        "specified; translate only the human-readable content values."
+    ),
+    "zh": (
+        "\n\n语言：所有自然语言输出——叙事、摘要、描述、事件/实体名称、预感正文"
+        "——一律使用中文。JSON 字段键名与枚举/类型值保持原样，仅翻译可读内容值。"
+    ),
+}
+
+
+def _apply_language_directive(messages: list[dict], lang: str) -> list[dict]:
+    """Append the language directive to the (first) system message, or prepend a
+    new system message if none exists. Returns a new list; input is not mutated."""
+    directive = _LANG_DIRECTIVE.get(lang)
+    if not directive:
+        return messages
+    out = [dict(m) for m in messages]
+    for m in out:
+        if m.get("role") == "system":
+            m["content"] = (m.get("content") or "") + directive
+            return out
+    return [{"role": "system", "content": directive.strip()}, *out]
 
 
 def _strip_json(text: str | None) -> str:
@@ -54,6 +88,7 @@ async def call_ai(
     c = _resolve_config(config)
     if not c["api_key"]:
         raise RuntimeError("AI API key not configured. Set it in Project settings or .env.")
+    messages = _apply_language_directive(messages, c["narrative_language"])
     headers = {
         "Authorization": f"Bearer {c['api_key']}",
         "Content-Type": "application/json",

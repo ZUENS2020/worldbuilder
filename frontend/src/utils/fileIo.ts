@@ -1,4 +1,5 @@
 /** Browser file download / upload helpers for import-export features. */
+import i18n from '../i18n';
 
 /** Trigger a download of `data` as a pretty-printed JSON file. */
 export function downloadJson(filename: string, data: unknown) {
@@ -28,10 +29,10 @@ export function pickJsonFile(): Promise<unknown | null> {
         try {
           resolve(JSON.parse(String(reader.result)));
         } catch (e) {
-          reject(new Error('文件不是合法的 JSON'));
+          reject(new Error(i18n.t('fileIo.invalidJson')));
         }
       };
-      reader.onerror = () => reject(reader.error ?? new Error('读取文件失败'));
+      reader.onerror = () => reject(reader.error ?? new Error(i18n.t('fileIo.readFail')));
       reader.readAsText(file);
     };
     input.click();
@@ -53,7 +54,7 @@ function _cardFromPng(buf: ArrayBuffer): unknown | null {
   const bytes = new Uint8Array(buf);
   // PNG signature.
   const sig = [137, 80, 78, 71, 13, 10, 26, 10];
-  for (let i = 0; i < 8; i++) if (bytes[i] !== sig[i]) throw new Error('不是有效的 PNG 文件');
+  for (let i = 0; i < 8; i++) if (bytes[i] !== sig[i]) throw new Error(i18n.t('fileIo.notPng'));
 
   const view = new DataView(buf);
   let off = 8;
@@ -81,7 +82,7 @@ function _cardFromPng(buf: ArrayBuffer): unknown | null {
   try {
     return JSON.parse(_b64ToUtf8(raw));
   } catch {
-    throw new Error('PNG 中的角色卡数据无法解析');
+    throw new Error(i18n.t('fileIo.pngParseFail'));
   }
 }
 
@@ -98,15 +99,15 @@ export function pickCharacterCardFile(): Promise<unknown | null> {
       if (!file) return resolve(null);
       const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
       const reader = new FileReader();
-      reader.onerror = () => reject(reader.error ?? new Error('读取文件失败'));
+      reader.onerror = () => reject(reader.error ?? new Error(i18n.t('fileIo.readFail')));
       if (isPng) {
         reader.onload = () => {
           try {
             const card = _cardFromPng(reader.result as ArrayBuffer);
-            if (!card) return reject(new Error('该 PNG 未内嵌角色卡数据'));
+            if (!card) return reject(new Error(i18n.t('fileIo.pngNoCard')));
             resolve(card);
           } catch (e) {
-            reject(e instanceof Error ? e : new Error('读取角色卡失败'));
+            reject(e instanceof Error ? e : new Error(i18n.t('fileIo.readCardFail')));
           }
         };
         reader.readAsArrayBuffer(file);
@@ -115,7 +116,7 @@ export function pickCharacterCardFile(): Promise<unknown | null> {
           try {
             resolve(JSON.parse(String(reader.result)));
           } catch {
-            reject(new Error('文件不是合法的 JSON'));
+            reject(new Error(i18n.t('fileIo.invalidJson')));
           }
         };
         reader.readAsText(file);

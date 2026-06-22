@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import Markdown from './Markdown';
 import { useTextHistory } from '../../hooks/useTextHistory';
 
@@ -13,6 +14,7 @@ type ViewMode = 'edit' | 'preview' | 'split';
 
 // Centered large editor for long-form fields (backstory, prose, etc.)
 export default function TextEditorModal({ title, initialValue, onSave, onClose }: TextEditorModalProps) {
+  const { t } = useTranslation();
   const h = useTextHistory(initialValue);
   const value = h.value;
   const [view, setView] = useState<ViewMode>('split');
@@ -46,7 +48,7 @@ export default function TextEditorModal({ title, initialValue, onSave, onClose }
       >
         <div className="mt-panel-title" style={{ justifyContent: 'space-between', height: 30, flex: '0 0 30px' }}>
           <span>✍️ {title}</span>
-          <span style={{ fontSize: 10, color: 'var(--mt-text-muted)', fontWeight: 400 }}>{value.length} 字 · ⌘/Ctrl+Enter 保存 · Esc 关闭</span>
+          <span style={{ fontSize: 10, color: 'var(--mt-text-muted)', fontWeight: 400 }}>{t('textEditor.meta', { count: value.length })}</span>
         </div>
 
         {/* Toolbar: view toggle + undo/redo */}
@@ -55,7 +57,7 @@ export default function TextEditorModal({ title, initialValue, onSave, onClose }
           borderBottom: '1px solid var(--mt-border-soft)', flex: '0 0 auto',
         }}>
           <div style={{ display: 'flex', border: '1px solid var(--mt-border)', borderRadius: 4, overflow: 'hidden' }}>
-            {([['edit', '编辑'], ['preview', '预览'], ['split', '分栏']] as const).map(([key, label]) => (
+            {([['edit', t('textEditor.edit')], ['preview', t('textEditor.preview')], ['split', t('textEditor.split')]] as const).map(([key, label]) => (
               <button
                 key={key}
                 onClick={() => setView(key)}
@@ -71,8 +73,8 @@ export default function TextEditorModal({ title, initialValue, onSave, onClose }
             ))}
           </div>
           <div style={{ flex: 1 }} />
-          <button className="mt-btn" onClick={h.undo} disabled={!h.canUndo} title="撤销 (⌘/Ctrl+Z)" style={{ fontSize: 13, padding: '2px 8px', border: '1px solid var(--mt-border)' }}>↶</button>
-          <button className="mt-btn" onClick={h.redo} disabled={!h.canRedo} title="重做 (⌘/Ctrl+Shift+Z)" style={{ fontSize: 13, padding: '2px 8px', border: '1px solid var(--mt-border)' }}>↷</button>
+          <button className="mt-btn" onClick={h.undo} disabled={!h.canUndo} title={t('textEditor.undo')} style={{ fontSize: 13, padding: '2px 8px', border: '1px solid var(--mt-border)' }}>↶</button>
+          <button className="mt-btn" onClick={h.redo} disabled={!h.canRedo} title={t('textEditor.redo')} style={{ fontSize: 13, padding: '2px 8px', border: '1px solid var(--mt-border)' }}>↷</button>
         </div>
 
         <div style={{ flex: 1, padding: 12, minHeight: 0, display: 'flex', gap: 12 }}>
@@ -108,9 +110,9 @@ export default function TextEditorModal({ title, initialValue, onSave, onClose }
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '0 12px 12px' }}>
-          <button className="mt-btn" style={{ border: '1px solid var(--mt-border)' }} onClick={onClose}>取消</button>
+          <button className="mt-btn" style={{ border: '1px solid var(--mt-border)' }} onClick={onClose}>{t('common.cancel')}</button>
           <button className="mt-btn active" style={{ fontWeight: 600, border: '1px solid var(--mt-accent)' }} onClick={() => { onSave(value); onClose(); }}>
-            保存
+            {t('common.save')}
           </button>
         </div>
       </div>
