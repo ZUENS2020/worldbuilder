@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { BaseEdge, getStraightPath, type EdgeProps } from '@xyflow/react';
+import { useTranslation } from 'react-i18next';
 import { getRelationConfig } from '../../types';
 import { useAppStore } from '../../stores/appStore';
 
@@ -18,6 +19,7 @@ function RelationEdge({
   data,
   selected,
 }: EdgeProps) {
+  const { t } = useTranslation();
   const customRelationTypes = useAppStore((s) => s.customRelationTypes);
   const relType = data?.relationType as string || 'ally';
   const allConfig = getRelationConfig(customRelationTypes);
@@ -120,7 +122,7 @@ function RelationEdge({
           opacity={isDimmed ? 0.15 : isRevealed || selected ? 1 : isCharLink ? 0.9 : 0.7}
           style={{ pointerEvents: 'none' }}
         >
-          {config.label}
+          {t(config.label)}
         </text>
       )}
     </>

@@ -1,30 +1,31 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSimStore, type SimTick } from '../../stores/simStore';
 
 /** Render one mutation as a compact, human-readable chip. */
-function mutationLabel(m: any): string {
+function mutationLabel(m: any, tr: (k: string, o?: any) => string): string {
   switch (m.op) {
     case 'update_relation': {
       const bits: string[] = [];
       if (m.type) bits.push(`→ ${m.type}`);
-      if (m.weight != null) bits.push(`权重 ${Number(m.weight).toFixed(2)}`);
+      if (m.weight != null) bits.push(tr('feed.weight', { w: Number(m.weight).toFixed(2) }));
       return `${m.source} ↔ ${m.target} ${bits.join(' · ')}`.trim();
     }
     case 'create_relation':
-      return `新关系 ${m.source} ↔ ${m.target}（${m.type} ${Number(m.weight ?? 0).toFixed(2)}）`;
+      return tr('feed.newRelation', { source: m.source, target: m.target, type: m.type, weight: Number(m.weight ?? 0).toFixed(2) });
     case 'update_entity': {
       const p = m.properties || {};
       const bits = Object.entries(p).map(([k, v]) => `${k}=${v}`);
-      return `${m.entity}：${bits.join('，')}`;
+      return tr('feed.updateEntity', { entity: m.entity, bits: bits.join('，') });
     }
     case 'create_entity':
-      return `新实体 ${m.name}（${m.type}）`;
+      return tr('feed.newEntity', { name: m.name, type: m.type });
     case 'create_event':
-      return `⚡ 事件「${m.name}」${m.summary ? `：${m.summary}` : ''}`;
+      return m.summary ? tr('feed.eventWith', { name: m.name, summary: m.summary }) : tr('feed.eventBare', { name: m.name });
     case 'register_pending_event':
-      return `🕓 悬决「${m.name}」${m.stakes ? `：${m.stakes}` : ''}`;
+      return m.stakes ? tr('feed.pendingWith', { name: m.name, stakes: m.stakes }) : tr('feed.pendingBare', { name: m.name });
     case 'resolve_event':
-      return `✅ 结算「${m.name}」${m.outcome ? `：${m.outcome}` : ''}`;
+      return m.outcome ? tr('feed.resolveWith', { name: m.name, outcome: m.outcome }) : tr('feed.resolveBare', { name: m.name });
     case undefined:
       return JSON.stringify(m);
     default:
@@ -33,6 +34,7 @@ function mutationLabel(m: any): string {
 }
 
 function TickCard({ t, highlight }: { t: SimTick; highlight?: boolean }) {
+  const { t: tr } = useTranslation();
   const interactions = Array.isArray(t.interactions) ? t.interactions : [];
   const mutations = Array.isArray(t.mutations) ? t.mutations : [];
   const m = t.metrics || {};
@@ -53,13 +55,13 @@ function TickCard({ t, highlight }: { t: SimTick; highlight?: boolean }) {
           Tick {t.tick}
         </span>
         <span style={{ fontSize: 10, color: 'var(--mt-text-faint)' }}>
-          {m.encounters ?? interactions.length} 次相遇 · {mutations.length} 处演化
-          {m.resolved_events ? ` · 结算 ${m.resolved_events}` : ''}
-          {m.pending_registered ? ` · 新悬决 ${m.pending_registered}` : ''}
-          {m.pending_registered_from_drought ? ` · 补种 ${m.pending_registered_from_drought}` : ''}
-          {m.dedupe_llm_skipped ? ` · 去重 ${m.dedupe_llm_skipped}` : ''}
-          {m.pending_drought ? ' · 悬决空窗' : ''}
-          {m.oracle_fallback ? ` · 裁决补全(${m.oracle_fallback})` : ''}
+          {tr('feed.encounters', { enc: m.encounters ?? interactions.length, mut: mutations.length })}
+          {m.resolved_events ? tr('feed.resolvedSuffix', { n: m.resolved_events }) : ''}
+          {m.pending_registered ? tr('feed.pendingSuffix', { n: m.pending_registered }) : ''}
+          {m.pending_registered_from_drought ? tr('feed.droughtSuffix', { n: m.pending_registered_from_drought }) : ''}
+          {m.dedupe_llm_skipped ? tr('feed.dedupeSuffix', { n: m.dedupe_llm_skipped }) : ''}
+          {m.pending_drought ? tr('feed.pendingDrought') : ''}
+          {m.oracle_fallback ? tr('feed.oracleFallback', { n: m.oracle_fallback }) : ''}
           {m.latency_ms != null ? ` · ${(m.latency_ms / 1000).toFixed(1)}s` : ''}
         </span>
       </div>
@@ -93,7 +95,7 @@ function TickCard({ t, highlight }: { t: SimTick; highlight?: boolean }) {
                 fontSize: 10, color, background: bg,
                 border: `1px solid ${border}`, borderRadius: 3, padding: '1px 6px',
               }}>
-                {mutationLabel(mu)}
+                {mutationLabel(mu, tr)}
               </span>
             );
           })}
@@ -104,6 +106,7 @@ function TickCard({ t, highlight }: { t: SimTick; highlight?: boolean }) {
 }
 
 export default function InteractionFeed() {
+  const { t: tr } = useTranslation();
   const ticks = useSimStore((s) => s.ticks);
   const stepping = useSimStore((s) => s.stepping);
   const scrubTick = useSimStore((s) => s.scrubTick);
@@ -126,7 +129,7 @@ export default function InteractionFeed() {
   if (ticks.length === 0 && !stepping) {
     return (
       <div style={{ padding: 24, textAlign: 'center', color: 'var(--mt-text-faint)', fontSize: 12 }}>
-        还没有世界事件。点击「单步推进 ⏭」让角色们开始互动。
+        {tr('feed.empty')}
       </div>
     );
   }
@@ -136,7 +139,7 @@ export default function InteractionFeed() {
       {ticks.map((t) => <TickCard key={t.id} t={t} highlight={scrubTick === t.tick} />)}
       {stepping && (
         <div style={{ padding: '12px', textAlign: 'center', color: 'var(--mt-text-muted)', fontSize: 12 }}>
-          ⏳ 角色们正在互动，世界正在演化…
+          {tr('feed.evolving')}
         </div>
       )}
       {pauseNotice && !stepping && (
@@ -145,10 +148,10 @@ export default function InteractionFeed() {
           border: '1px solid var(--mt-border)', borderRadius: 6,
           background: 'var(--mt-window)', color: 'var(--mt-text-muted)', fontSize: 12.5,
         }}>
-          <div style={{ fontWeight: 700, color: 'var(--mt-text)', marginBottom: 2 }}>🎬 本幕落幕</div>
+          <div style={{ fontWeight: 700, color: 'var(--mt-text)', marginBottom: 2 }}>{tr('feed.curtain')}</div>
           {pauseNotice.reason === 'quiescent'
-            ? `世界已入稳态（tick ${pauseNotice.tick}）—— 各方目标尘埃落定，无新的实质张力。继续推进可注入新变量。`
-            : `已抵达预设回合上限（tick ${pauseNotice.tick}）。继续推进可解除上限。`}
+            ? tr('feed.quiescent', { tick: pauseNotice.tick })
+            : tr('feed.maxTicks', { tick: pauseNotice.tick })}
         </div>
       )}
       <div ref={endRef} />

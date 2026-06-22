@@ -1,5 +1,7 @@
 # WorldBuilder 架构总览
 
+**简体中文** · [English](architecture.en.md)
+
 > 一句话:WorldBuilder 把「写世界观」当成一次**情报调查**,再用一台**因果推演引擎**让这个世界自己往前走。
 >
 > 本文用图说话,帮你在十分钟内建立对整个项目的心智模型。逐模块的实现细节见 [`simulation-engine.md`](simulation-engine.md)(推演引擎)与 [`import-export.md`](import-export.md)(导入导出)。

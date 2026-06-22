@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../stores/appStore';
 import { api } from '../../services/api';
 import { downloadJson, pickJsonFile } from '../../utils/fileIo';
@@ -10,6 +11,7 @@ interface ProjectSwitcherProps {
 }
 
 export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSwitcherProps) {
+  const { t, i18n } = useTranslation();
   const { project, projects, switchProject, deleteProject } = useAppStore();
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -38,7 +40,7 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`确定删除项目「${name}」？所有实体、关系和文档将被永久删除。`)) return;
+    if (!confirm(t('projectSwitcher.deleteConfirm', { name }))) return;
     await deleteProject(id);
     // If no projects left, onClose will let App.tsx show the project selection page
     if (useAppStore.getState().projects.length === 0) {
@@ -65,7 +67,7 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
       downloadJson(name, bundle);
     } catch (e) {
       console.error('Failed to export project:', e);
-      alert('导出失败：' + (e as Error).message);
+      alert(t('projectSwitcher.exportFailed') + (e as Error).message);
     }
   };
 
@@ -81,7 +83,7 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
       onClose();
     } catch (e) {
       console.error('Failed to import project:', e);
-      alert('导入失败：' + (e as Error).message);
+      alert(t('projectSwitcher.importFailed') + (e as Error).message);
     }
     setCreating(false);
   };
@@ -122,15 +124,15 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
           padding: '8px 12px', borderBottom: '1px solid var(--mt-border)',
           fontWeight: 600, fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
-          <span>📁 切换项目</span>
-          <span style={{ color: 'var(--mt-text-faint)', fontSize: 10 }}>{projects.length} 个项目</span>
+          <span>{t('projectSwitcher.title')}</span>
+          <span style={{ color: 'var(--mt-text-faint)', fontSize: 10 }}>{t('projectSwitcher.count', { count: projects.length })}</span>
         </div>
 
         {/* Project list */}
         <div style={{ maxHeight: 280, overflowY: 'auto' }}>
           {projects.length === 0 && (
             <div style={{ padding: 16, textAlign: 'center', color: 'var(--mt-text-faint)', fontSize: 12 }}>
-              暂无项目，在下方创建
+              {t('projectSwitcher.empty')}
             </div>
           )}
           {projects.map((p) => {
@@ -163,7 +165,7 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
                     {p.name}
                   </div>
                   <div style={{ fontSize: 9, color: 'var(--mt-text-faint)' }}>
-                    {p.updated_at ? new Date(p.updated_at).toLocaleDateString('zh-CN') : ''}
+                    {p.updated_at ? new Date(p.updated_at).toLocaleDateString(i18n.language === 'en' ? 'en-US' : 'zh-CN') : ''}
                   </div>
                 </div>
                 <span
@@ -171,7 +173,7 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
                   style={{ fontSize: 11, color: '#ccc', cursor: 'pointer', padding: '2px 4px' }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = 'var(--mt-accent)'; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#ccc'; }}
-                  title="导出图谱（实体+关系+世界书）"
+                  title={t('projectSwitcher.exportTip')}
                 >
                   ⬇
                 </span>
@@ -180,12 +182,12 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
                   style={{ fontSize: 11, color: '#ccc', cursor: 'pointer', padding: '2px 4px' }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = 'var(--mt-accent)'; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#ccc'; }}
-                  title="复制为沙盒副本"
+                  title={t('projectSwitcher.duplicateTip')}
                 >
                   ⧉
                 </span>
                 {isCurrent && (
-                  <span style={{ fontSize: 10, color: 'var(--mt-accent)', fontWeight: 600 }}>当前</span>
+                  <span style={{ fontSize: 10, color: 'var(--mt-accent)', fontWeight: 600 }}>{t('projectSwitcher.current')}</span>
                 )}
                 {!isCurrent && (
                   <span
@@ -193,7 +195,7 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
                     style={{ fontSize: 10, color: '#ccc', cursor: 'pointer', padding: '2px 4px' }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#c0392b'; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.color = '#ccc'; }}
-                    title="删除项目"
+                    title={t('projectSwitcher.deleteTip')}
                   >
                     ✕
                   </span>
@@ -212,7 +214,7 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            placeholder="新建项目名称..."
+            placeholder={t('projectSwitcher.newNamePlaceholder')}
             style={{
               flex: 1, background: 'var(--mt-window)', border: '1px solid var(--mt-border)',
               borderRadius: 3, padding: '4px 8px', fontSize: 11, color: 'var(--mt-text)', outline: 'none',
@@ -224,7 +226,7 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
             className="mt-btn active"
             style={{ fontSize: 10, padding: '4px 10px', fontWeight: 600, border: '1px solid var(--mt-accent)', whiteSpace: 'nowrap' }}
           >
-            {creating ? '...' : '创建'}
+            {creating ? '...' : t('common.createConfirm')}
           </button>
         </div>
 
@@ -235,9 +237,9 @@ export default function ProjectSwitcher({ open, onClose, anchorRect }: ProjectSw
             disabled={creating}
             className="mt-btn"
             style={{ width: '100%', fontSize: 10, padding: '5px 0', border: '1px solid var(--mt-border)' }}
-            title="从图谱 JSON 新建项目（实体+关系+世界书）"
+            title={t('projectSwitcher.importTip')}
           >
-            ⬆ 导入图谱（新建项目）
+            {t('projectSwitcher.importBtn')}
           </button>
         </div>
       </div>

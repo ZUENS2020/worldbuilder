@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { RELATION_CONFIG, TAG_COLORS } from '../../types';
 import { useAppStore } from '../../stores/appStore';
 
@@ -18,6 +19,7 @@ const COMMON_TYPES = [
 export default function RelationPicker({
   onSelect, onCancel, sourceName, targetName, position,
 }: RelationPickerProps) {
+  const { t: tr } = useTranslation();
   const { customRelationTypes, addCustomRelationType } = useAppStore();
 
   return (
@@ -65,7 +67,7 @@ export default function RelationPicker({
               onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
             >
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: c.color, flexShrink: 0 }} />
-              <span>{c.label}</span>
+              <span>{tr(c.label)}</span>
             </div>
           );
         })}
@@ -74,7 +76,7 @@ export default function RelationPicker({
         {customRelationTypes.length > 0 && (
           <>
             <div style={{ padding: '4px 10px 2px', fontSize: 9, color: 'var(--mt-text-faint)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, borderTop: '1px solid var(--mt-border-soft)', marginTop: 2 }}>
-              自定义
+              {tr('relationPicker.custom')}
             </div>
             {customRelationTypes.map((ct) => (
               <div
@@ -104,7 +106,7 @@ export default function RelationPicker({
             color: 'var(--mt-accent)',
           }}
           onClick={() => {
-            const name = prompt('自定义关系类型名称:');
+            const name = prompt(tr('relationPicker.customNamePrompt'));
             if (!name?.trim()) return;
             const color = TAG_COLORS[Math.floor(Math.random() * TAG_COLORS.length)];
             addCustomRelationType(name.trim(), color, 'solid');
@@ -120,7 +122,7 @@ export default function RelationPicker({
           onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
         >
           <span>✨</span>
-          <span>自定义新类型...</span>
+          <span>{tr('relationPicker.customNew')}</span>
         </div>
       </div>
     </>

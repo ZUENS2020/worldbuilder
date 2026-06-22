@@ -127,35 +127,39 @@ export function getRelationConfig(customTypes?: CustomRelationType[]): Record<st
 // Visual config per entity type (Maltego-style palette)
 // Characters are the PRIMARY nodes — bigger, more prominent.
 // Factions/events/locations are SECONDARY — smaller, satellite.
+// NOTE: `label` holds an i18n key (e.g. 'entityType.character'); pass it through
+// t() at display sites. Custom relation types use their raw name as label —
+// t() returns unknown keys unchanged, so raw names render fine too.
 export const ENTITY_CONFIG: Record<EntityType, { color: string; icon: string; label: string; size: number; shape: 'circle' | 'diamond' | 'hexagon' | 'rect' }> = {
-  character: { color: '#3a7bd5', icon: '👤', label: '人物', size: 62, shape: 'circle' },
-  location:  { color: '#2faa5e', icon: '📍', label: '地点', size: 44, shape: 'diamond' },
-  event:     { color: '#e08a1e', icon: '⚡', label: '事件', size: 44, shape: 'hexagon' },
-  item:      { color: '#8e5cc4', icon: '💎', label: '物品', size: 44, shape: 'diamond' },
-  faction:   { color: '#d24b43', icon: '⚔️', label: '阵营', size: 50, shape: 'rect' },
+  character: { color: '#3a7bd5', icon: '👤', label: 'entityType.character', size: 62, shape: 'circle' },
+  location:  { color: '#2faa5e', icon: '📍', label: 'entityType.location', size: 44, shape: 'diamond' },
+  event:     { color: '#e08a1e', icon: '⚡', label: 'entityType.event', size: 44, shape: 'hexagon' },
+  item:      { color: '#8e5cc4', icon: '💎', label: 'entityType.item', size: 44, shape: 'diamond' },
+  faction:   { color: '#d24b43', icon: '⚔️', label: 'entityType.faction', size: 50, shape: 'rect' },
 };
 
-// Entity types grouped into palette categories (like Maltego's Entity Palette)
+// Entity types grouped into palette categories (like Maltego's Entity Palette).
+// `name` is an i18n key — pass through t() at display sites.
 export const PALETTE_CATEGORIES: { name: string; types: EntityType[] }[] = [
-  { name: '角色 People', types: ['character'] },
-  { name: '世界 World', types: ['location', 'faction'] },
-  { name: '叙事 Narrative', types: ['event', 'item'] },
+  { name: 'paletteCategory.people', types: ['character'] },
+  { name: 'paletteCategory.world', types: ['location', 'faction'] },
+  { name: 'paletteCategory.narrative', types: ['event', 'item'] },
 ];
 
-// Visual config per relation type
+// Visual config per relation type. `label` is an i18n key (relation.*).
 export const RELATION_CONFIG: Record<string, { color: string; style: string; label: string }> = {
-  ally:        { color: '#2ECC71', style: 'solid',  label: '盟友' },
-  enemy:       { color: '#E74C3C', style: 'dashed', label: '敌对' },
-  lover:       { color: '#E91E63', style: 'solid',  label: '恋人' },
-  family:      { color: '#FF9800', style: 'solid',  label: '家族' },
-  rival:       { color: '#FF5722', style: 'dashed', label: '对手' },
-  mentor:      { color: '#00BCD4', style: 'solid',  label: '师徒' },
-  subordinate: { color: '#795548', style: 'solid',  label: '从属' },
-  member_of:   { color: '#9C27B0', style: 'solid',  label: '属于' },
-  located_at:  { color: '#4CAF50', style: 'dotted', label: '位于' },
-  participated:{ color: '#FF9800', style: 'dotted', label: '参与' },
-  caused:      { color: '#F44336', style: 'solid',  label: '导致' },
-  followed_by: { color: '#03A9F4', style: 'dotted', label: '随后' },
-  holds:       { color: '#9B59B6', style: 'solid',  label: '持有' },
-  owns:        { color: '#8BC34A', style: 'solid',  label: '拥有' },
+  ally:        { color: '#2ECC71', style: 'solid',  label: 'relation.ally' },
+  enemy:       { color: '#E74C3C', style: 'dashed', label: 'relation.enemy' },
+  lover:       { color: '#E91E63', style: 'solid',  label: 'relation.lover' },
+  family:      { color: '#FF9800', style: 'solid',  label: 'relation.family' },
+  rival:       { color: '#FF5722', style: 'dashed', label: 'relation.rival' },
+  mentor:      { color: '#00BCD4', style: 'solid',  label: 'relation.mentor' },
+  subordinate: { color: '#795548', style: 'solid',  label: 'relation.subordinate' },
+  member_of:   { color: '#9C27B0', style: 'solid',  label: 'relation.member_of' },
+  located_at:  { color: '#4CAF50', style: 'dotted', label: 'relation.located_at' },
+  participated:{ color: '#FF9800', style: 'dotted', label: 'relation.participated' },
+  caused:      { color: '#F44336', style: 'solid',  label: 'relation.caused' },
+  followed_by: { color: '#03A9F4', style: 'dotted', label: 'relation.followed_by' },
+  holds:       { color: '#9B59B6', style: 'solid',  label: 'relation.holds' },
+  owns:        { color: '#8BC34A', style: 'solid',  label: 'relation.owns' },
 };

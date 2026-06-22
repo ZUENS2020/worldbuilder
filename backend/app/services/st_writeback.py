@@ -18,6 +18,7 @@ from app.services.simulation import (
     _build_snapshot,
     _cfg,
     _name_index,
+    ai_passthrough_config,
 )
 
 
@@ -154,7 +155,7 @@ async def preview_items(
             if (e := graph_engine.entities.get(eid))
         ]
         scenes = _scene_from_items(rows)
-        config = sim.config or {}
+        config = await ai_passthrough_config(db, sim)
         verdict = await ai_service.ai_adjudicate(
             scenes, catalog,
             allow_new_entities=bool(_cfg(sim, "allow_new_entities")),
@@ -216,7 +217,7 @@ async def apply_items(
     await db.flush()
 
     tick = (sim.current_tick or 0) + 1
-    config = sim.config or {}
+    config = await ai_passthrough_config(db, sim)
     all_mutations: list[dict] = []
     applied_ids: list[str] = []
 

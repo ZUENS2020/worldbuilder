@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../stores/appStore';
 import { ENTITY_CONFIG, PALETTE_CATEGORIES, TAG_COLORS } from '../../types';
 import type { EntityType, Tag } from '../../types';
@@ -7,6 +8,7 @@ import { pickCharacterCardFile } from '../../utils/fileIo';
 export const DND_MIME = 'application/worldbuilder-entity-type';
 
 export default function Palette() {
+  const { t } = useTranslation();
   const {
     addEntity, importCharacterCard, project, entities, selectedEntityIds,
     createOpen, setCreateOpen, selectEntity, focusOnEntity,
@@ -47,10 +49,10 @@ export default function Palette() {
       const card = await pickCharacterCardFile();
       if (!card) return; // user cancelled
       const entity = await importCharacterCard(card);
-      setImportStatus(`✓ 已导入「${entity.name}」`);
+      setImportStatus(t('palette.imported', { name: entity.name }));
       window.setTimeout(() => setImportStatus(null), 3500);
     } catch (e) {
-      setImportStatus(`⚠️ ${e instanceof Error ? e.message : '导入失败'}`);
+      setImportStatus(`⚠️ ${e instanceof Error ? e.message : t('palette.importFailed')}`);
     }
   };
 
@@ -104,14 +106,14 @@ export default function Palette() {
 
   return (
     <div className="mt-panel" style={{ width: 230, borderTop: 'none', borderBottom: 'none' }}>
-      <div className="mt-panel-title">🎨 实体调色盘</div>
+      <div className="mt-panel-title">{t('palette.title')}</div>
 
       {/* Search */}
       <div style={{ padding: 6, borderBottom: '1px solid var(--mt-border-soft)' }}>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="🔍 搜索实体..."
+          placeholder={t('palette.searchPlaceholder')}
           style={inputStyle}
         />
         <button
@@ -123,9 +125,9 @@ export default function Palette() {
             fontSize: 11, border: '1px dashed var(--mt-border)',
             color: 'var(--mt-text-muted)',
           }}
-          title="导入 SillyTavern / TavernAI 角色卡（.json 或内嵌 .png）"
+          title={t('palette.importCardTitle')}
         >
-          🃏 导入角色卡
+          {t('palette.importCard')}
         </button>
         {importStatus && (
           <div style={{
@@ -148,7 +150,7 @@ export default function Palette() {
                 style={catHeaderStyle}
               >
                 <span style={{ fontSize: 9, width: 10 }}>{isCollapsed ? '▶' : '▼'}</span>
-                {cat.name}
+                {t(cat.name)}
               </div>
               {!isCollapsed &&
                 cat.types.map((t) => {
@@ -160,7 +162,7 @@ export default function Palette() {
                       draggable
                       onDragStart={(e) => onDragStart(e, t)}
                       onDoubleClick={() => { setNewType(t); setCreateOpen(true); }}
-                      title={`拖拽到画布创建「${c.label}」，或双击`}
+                      title={t('palette.dragHint', { label: c.label })}
                       style={typeRowStyle}
                       onMouseEnter={(ev) => ((ev.currentTarget as HTMLDivElement).style.background = 'var(--mt-btn-hover)')}
                       onMouseLeave={(ev) => ((ev.currentTarget as HTMLDivElement).style.background = 'transparent')}
@@ -174,7 +176,7 @@ export default function Palette() {
                       >
                         {c.icon}
                       </span>
-                      <span style={{ fontSize: 12 }}>{c.label}</span>
+                      <span style={{ fontSize: 12 }}>{t(c.label)}</span>
                       {count > 0 && (
                         <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--mt-text-faint)' }}>{count}</span>
                       )}
@@ -206,7 +208,7 @@ export default function Palette() {
               cursor: 'pointer',
             }}
           >
-            按类型
+            {t('palette.byType')}
           </button>
           <button
             onClick={() => setViewMode('tag')}
@@ -218,7 +220,7 @@ export default function Palette() {
               cursor: 'pointer',
             }}
           >
-            按标签
+            {t('palette.byTag')}
           </button>
         </div>
 
@@ -245,7 +247,7 @@ export default function Palette() {
               >
                 <span style={{ fontSize: 8, width: 10 }}>{isCollapsed ? '▶' : '▼'}</span>
                 <span style={{ fontSize: 12 }}>{c.icon}</span>
-                {c.label}
+                {t(c.label)}
                 <span style={{
                   marginLeft: 'auto', fontSize: 10, fontWeight: 400,
                   color: 'var(--mt-text-faint)',
@@ -354,7 +356,7 @@ export default function Palette() {
                     <span
                       onClick={(e) => { e.stopPropagation(); removeTag(tag.id); }}
                       style={{ fontSize: 12, color: '#999', cursor: 'pointer', padding: '0 2px' }}
-                      title="删除标签"
+                      title={t('palette.deleteTag')}
                     >
                       ✕
                     </span>
@@ -401,7 +403,7 @@ export default function Palette() {
                     }}
                   >
                     <span style={{ fontSize: 8, width: 10 }}>{isCollapsed ? '▶' : '▼'}</span>
-                    未归类
+                    {t('palette.uncategorized')}
                     <span style={{
                       marginLeft: 'auto', fontSize: 10, fontWeight: 400,
                       color: 'var(--mt-text-faint)',
@@ -437,7 +439,7 @@ export default function Palette() {
                 <input
                   value={newTagName}
                   onChange={(e) => setNewTagName(e.target.value)}
-                  placeholder="标签名称"
+                  placeholder={t('palette.tagNamePlaceholder')}
                   onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
                   autoFocus
                   style={{ ...inputStyle, marginBottom: 6 }}
@@ -457,10 +459,10 @@ export default function Palette() {
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button onClick={handleAddTag} disabled={!newTagName.trim()} className="mt-btn active" style={{ flex: 1, justifyContent: 'center', fontWeight: 600, fontSize: 11 }}>
-                    创建
+                    {t('common.createConfirm')}
                   </button>
                   <button onClick={() => setShowNewTag(false)} className="mt-btn" style={{ fontSize: 11, border: '1px solid var(--mt-border)' }}>
-                    取消
+                    {t('common.cancel')}
                   </button>
                 </div>
               </div>
@@ -474,7 +476,7 @@ export default function Palette() {
                   color: 'var(--mt-text-muted)',
                 }}
               >
-                + 新建标签
+                {t('palette.newTag')}
               </button>
             )}
           </>
@@ -484,11 +486,11 @@ export default function Palette() {
       {/* Create entity form */}
       {createOpen && (
         <div style={{ borderTop: '1px solid var(--mt-border)', padding: 8, background: '#fafafa' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6 }}>新建实体</div>
+          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6 }}>{t('palette.newEntity')}</div>
           <input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="实体名称"
+            placeholder={t('palette.entityNamePlaceholder')}
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
             autoFocus
             style={{ ...inputStyle, marginBottom: 6 }}
@@ -504,17 +506,17 @@ export default function Palette() {
                   className={`mt-btn${on ? ' active' : ''}`}
                   style={{ fontSize: 10, padding: '2px 6px', border: `1px solid ${on ? c.color : 'var(--mt-border)'}` }}
                 >
-                  {c.icon} {c.label}
+                  {c.icon} {t(c.label)}
                 </button>
               );
             })}
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button onClick={handleCreate} disabled={!newName.trim()} className="mt-btn active" style={{ flex: 1, justifyContent: 'center', fontWeight: 600 }}>
-              创建
+              {t('common.createConfirm')}
             </button>
             <button onClick={() => setCreateOpen(false)} className="mt-btn" style={{ border: '1px solid var(--mt-border)' }}>
-              取消
+              {t('common.cancel')}
             </button>
           </div>
         </div>
@@ -536,6 +538,7 @@ function EntityRow({
   entityMenuId: string | null; setEntityMenuId: (id: string | null) => void;
   currentTagId?: string;
 }) {
+  const { t } = useTranslation();
   const isOpen = entityMenuId === entityId;
   const clickTimer = useRef<number | null>(null);
 
@@ -561,7 +564,7 @@ function EntityRow({
       <div
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
-        title="单击选择 · 双击定位到画布"
+        title={t('palette.rowTitle')}
         style={{
           display: 'flex', alignItems: 'center', gap: 4, padding: '2px 10px 2px 24px',
           cursor: 'pointer', fontSize: 11, lineHeight: 1.4,
@@ -578,7 +581,7 @@ function EntityRow({
         <span
           onClick={(e) => { e.stopPropagation(); setEntityMenuId(isOpen ? null : entityId); }}
           style={{ fontSize: 10, color: '#bbb', cursor: 'pointer', padding: '0 2px', flexShrink: 0 }}
-          title="添加到标签"
+          title={t('palette.addToTag')}
         >
           …
         </span>
@@ -595,7 +598,7 @@ function EntityRow({
           onMouseLeave={() => setEntityMenuId(null)}
         >
           <div style={{ fontSize: 9, color: 'var(--mt-text-faint)', padding: '2px 6px', fontWeight: 600 }}>
-            移到标签
+            {t('palette.moveToTag')}
           </div>
           {tags.map((t) => {
             const inTag = t.entityIds.includes(entityId);
@@ -644,7 +647,7 @@ function EntityRow({
               onMouseEnter={(ev) => (ev.currentTarget as HTMLDivElement).style.background = '#fff0f0'}
               onMouseLeave={(ev) => (ev.currentTarget as HTMLDivElement).style.background = 'transparent'}
             >
-              ✕ 从此标签移除
+              {t('palette.removeFromThisTag')}
             </div>
           )}
         </div>

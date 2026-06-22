@@ -1,5 +1,7 @@
 # WorldBuilder 🌐
 
+**简体中文** · [English](README.en.md)
+
 > 构建世界观就像在做一次情报调查——你是自己世界的首席分析师。
 >
 > *A knowledge-graph worldbuilding platform that treats your story bible like an OSINT investigation.*

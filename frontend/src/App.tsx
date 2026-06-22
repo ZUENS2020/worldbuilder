@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ReactFlowProvider } from '@xyflow/react';
 import { useAppStore } from './stores/appStore';
 import { api } from './services/api';
@@ -15,6 +16,7 @@ import ProjectSwitcher from './components/ProjectSwitcher/ProjectSwitcher';
 import WorldBookDialog from './components/WorldBook/WorldBookDialog';
 
 function App() {
+  const { t } = useTranslation();
   const {
     project, setProject, loadProjectData, loadProjects, switchProject, deleteProject,
     projects, entities, relations,
@@ -100,7 +102,7 @@ function App() {
   };
 
   const handleDeleteProject = async (id: string, name: string) => {
-    if (!confirm(`确定删除项目「${name}」？所有实体与关系将被永久删除。`)) return;
+    if (!confirm(t('app.deleteProjectConfirm', { name }))) return;
     await deleteProject(id);
   };
 
@@ -110,13 +112,13 @@ function App() {
         <div style={{ textAlign: 'center', background: 'var(--mt-panel)', border: '1px solid var(--mt-border)', borderRadius: 8, padding: 40, boxShadow: '0 4px 24px rgba(0,0,0,0.12)', width: 'min(520px, 90vw)' }}>
           <div style={{ fontSize: 44, marginBottom: 12 }}>🌐</div>
           <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6, color: 'var(--mt-accent-dark)' }}>WorldBuilder</h1>
-          <p style={{ color: 'var(--mt-text-muted)', fontSize: 13, marginBottom: 22 }}>知识图谱驱动的世界观构建与调查</p>
+          <p style={{ color: 'var(--mt-text-muted)', fontSize: 13, marginBottom: 22 }}>{t('app.subtitle')}</p>
           <div style={{ display: 'flex', gap: 8, marginBottom: 20, justifyContent: 'center' }}>
             <input
               value={projectInput}
               onChange={(e) => setProjectInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
-              placeholder="输入项目名称..."
+              placeholder={t('app.projectNamePlaceholder')}
               autoFocus
               style={{ background: '#fff', border: '1px solid var(--mt-border)', borderRadius: 4, padding: '9px 12px', color: 'var(--mt-text)', fontSize: 14, outline: 'none', width: 240 }}
             />
@@ -126,12 +128,12 @@ function App() {
               className="mt-btn active"
               style={{ padding: '9px 18px', fontSize: 14, fontWeight: 600, border: '1px solid var(--mt-accent)' }}
             >
-              创建项目
+              {t('app.createProject')}
             </button>
           </div>
           {projects.length > 0 && (
             <div style={{ borderTop: '1px solid var(--mt-border)', paddingTop: 16 }}>
-              <div style={{ fontSize: 12, color: 'var(--mt-text-muted)', marginBottom: 10, fontWeight: 600 }}>已有项目</div>
+              <div style={{ fontSize: 12, color: 'var(--mt-text-muted)', marginBottom: 10, fontWeight: 600 }}>{t('app.existingProjects')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
                 {projects.map((p) => (
                   <div
@@ -147,7 +149,7 @@ function App() {
                     <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
                       <div style={{ fontSize: 10, color: 'var(--mt-text-faint)' }}>
-                        {p.description || '无描述'} · {p.updated_at ? new Date(p.updated_at).toLocaleDateString('zh-CN') : ''}
+                        {p.description || t('app.noDescription')} · {p.updated_at ? new Date(p.updated_at).toLocaleDateString() : ''}
                       </div>
                     </div>
                     <button
@@ -155,13 +157,13 @@ function App() {
                       className="mt-btn active"
                       style={{ fontSize: 11, padding: '4px 12px', fontWeight: 600, border: '1px solid var(--mt-accent)', whiteSpace: 'nowrap' }}
                     >
-                      打开
+                      {t('app.open')}
                     </button>
                     <button
                       onClick={() => handleDeleteProject(p.id, p.name)}
                       className="mt-btn"
                       style={{ fontSize: 11, padding: '4px 6px', border: '1px solid var(--mt-border)', color: '#c0392b' }}
-                      title="删除项目"
+                      title={t('app.deleteProjectTip')}
                     >
                       🗑️
                     </button>
@@ -176,9 +178,9 @@ function App() {
   }
 
   const viewConfig: Record<string, { icon: string; label: string }> = {
-    relations: { icon: '🕸️', label: '关系图' },
-    events: { icon: '⚡', label: '事件图' },
-    simulator: { icon: '🎭', label: '模拟器' },
+    relations: { icon: '🕸️', label: 'app.viewRelations' },
+    events: { icon: '⚡', label: 'app.viewEvents' },
+    simulator: { icon: '🎭', label: 'app.viewSimulator' },
   };
   const vc = viewConfig[viewMode] || viewConfig.relations;
 
@@ -193,7 +195,7 @@ function App() {
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div className="mt-panel" style={{ flex: 1, minHeight: 0, padding: 0 }}>
               <div className="mt-panel-title" style={{ justifyContent: 'space-between' }}>
-                <span>{vc.icon} {vc.label}</span>
+                <span>{vc.icon} {t(vc.label)}</span>
                 <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                   {(['relations', 'events', 'simulator'] as const).map((vm) => (
                     <button
@@ -202,7 +204,7 @@ function App() {
                       style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
                       onClick={() => setViewMode(vm)}
                     >
-                      {viewConfig[vm].icon} {viewConfig[vm].label}
+                      {viewConfig[vm].icon} {t(viewConfig[vm].label)}
                     </button>
                   ))}
                   <span style={{ width: 8 }} />
@@ -210,7 +212,7 @@ function App() {
                     className="mt-btn"
                     style={{ fontSize: 10, padding: '1px 8px', height: 18 }}
                     onClick={() => setWorldBookOpen(true)}
-                    title="世界书 World Book"
+                    title={t('app.worldBookTip')}
                   >
                     📖
                   </button>
@@ -241,7 +243,7 @@ function App() {
 
           <div
             onMouseDown={startResize}
-            title="拖拽调整宽度"
+            title={t('app.resizeTip')}
             style={{ width: 5, cursor: 'col-resize', flex: '0 0 5px', alignSelf: 'stretch', background: 'transparent' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--mt-sel-border)'; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
@@ -258,13 +260,13 @@ function App() {
             style={{ cursor: 'pointer', borderRadius: 3, padding: '1px 6px', transition: 'background 0.1s' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--mt-accent-bg)'; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; }}
-            title="点击切换项目"
+            title={t('app.switchProjectTip')}
           >
             📁 {project.name} ▾
           </span>
-          <span>●&nbsp;{entities.length} 实体</span>
-          <span>🔗 {relations.length} 关系</span>
-          <span style={{ marginLeft: 'auto', color: 'var(--mt-text-faint)' }}>右键节点打开 Transform 面板 · 拖拽调色盘到画布创建实体</span>
+          <span>●&nbsp;{t('app.entitiesCount', { count: entities.length })}</span>
+          <span>🔗 {t('app.relationsCount', { count: relations.length })}</span>
+          <span style={{ marginLeft: 'auto', color: 'var(--mt-text-faint)' }}>{t('app.statusHint')}</span>
         </div>
       </div>
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../stores/appStore';
 import { api } from '../../services/api';
 import { ImeInput, ImeTextarea } from '../common/ImeInput';
@@ -27,6 +28,7 @@ type WorldEntry = {
  * when an attached entity is in scene (see backend app/graph/worldbook.py).
  */
 export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps) {
+  const { t } = useTranslation();
   const { project, entities } = useAppStore();
   const [entries, setEntries] = useState<WorldEntry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -55,7 +57,7 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
 
   const handleCreate = async () => {
     const created = await api.createWorldEntry(project.id, {
-      title: '新词条', content: '', scope: 'global', priority: 0, enabled: 1,
+      title: t('worldBook.defaultTitle'), content: '', scope: 'global', priority: 0, enabled: 1,
     });
     setEntries((prev) => [...prev, created]);
     setSelectedId(created.id);
@@ -78,7 +80,7 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('删除此词条？')) return;
+    if (!confirm(t('worldBook.deleteConfirm'))) return;
     await api.deleteWorldEntry(project.id, id);
     setEntries((prev) => prev.filter((e) => e.id !== id));
     if (selectedId === id) setSelectedId(null);
@@ -91,7 +93,7 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
       downloadJson(`${project.name}-worldbook`, data);
     } catch (e) {
       console.error('Failed to export world book:', e);
-      alert('导出失败：' + (e as Error).message);
+      alert(t('worldBook.exportFail', { message: (e as Error).message }));
     }
   };
 
@@ -103,10 +105,10 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
       const created = await api.importWorldEntries(project.id, payload);
       await load();
       if (created[0]) setSelectedId(created[0].id);
-      alert(`已导入 ${created.length} 条词条到当前项目。`);
+      alert(t('worldBook.importDone', { count: created.length }));
     } catch (e) {
       console.error('Failed to import world book:', e);
-      alert('导入失败：' + (e as Error).message);
+      alert(t('worldBook.importFail', { message: (e as Error).message }));
     }
   };
 
@@ -137,11 +139,11 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--mt-border)', fontWeight: 600, fontSize: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>📖 世界书 World Book</span>
+          <span>📖 {t('worldBook.title')}</span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="mt-btn" onClick={handleImport} title="导入 SillyTavern 世界书 或 原生导出（追加到当前项目）" style={{ fontSize: 12, padding: '2px 10px', border: '1px solid var(--mt-border)' }}>⬆ 导入</button>
-            <button className="mt-btn" onClick={handleExport} title="导出当前项目全部词条为 JSON" style={{ fontSize: 12, padding: '2px 10px', border: '1px solid var(--mt-border)' }}>⬇ 导出</button>
-            <button className="mt-btn" onClick={onClose} style={{ fontSize: 12, padding: '2px 10px', border: '1px solid var(--mt-border)' }}>关闭</button>
+            <button className="mt-btn" onClick={handleImport} title={t('worldBook.importTip')} style={{ fontSize: 12, padding: '2px 10px', border: '1px solid var(--mt-border)' }}>{t('worldBook.import')}</button>
+            <button className="mt-btn" onClick={handleExport} title={t('worldBook.exportTip')} style={{ fontSize: 12, padding: '2px 10px', border: '1px solid var(--mt-border)' }}>{t('worldBook.export')}</button>
+            <button className="mt-btn" onClick={onClose} style={{ fontSize: 12, padding: '2px 10px', border: '1px solid var(--mt-border)' }}>{t('common.close')}</button>
           </div>
         </div>
 
@@ -149,12 +151,12 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
           {/* ── entry list ── */}
           <div style={{ width: 240, flex: '0 0 240px', borderRight: '1px solid var(--mt-border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ padding: 8, borderBottom: '1px solid var(--mt-border-soft)' }}>
-              <button className="mt-btn active" onClick={handleCreate} style={{ width: '100%', fontSize: 12, padding: '5px 0', border: '1px solid var(--mt-accent)' }}>＋ 新建词条</button>
+              <button className="mt-btn active" onClick={handleCreate} style={{ width: '100%', fontSize: 12, padding: '5px 0', border: '1px solid var(--mt-accent)' }}>{t('worldBook.newEntry')}</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-              {loading && <div style={{ padding: 12, fontSize: 12, color: 'var(--mt-text-faint)' }}>加载中…</div>}
+              {loading && <div style={{ padding: 12, fontSize: 12, color: 'var(--mt-text-faint)' }}>{t('worldBook.loading')}</div>}
               {!loading && entries.length === 0 && (
-                <div style={{ padding: 12, fontSize: 12, color: 'var(--mt-text-faint)' }}>（暂无词条）</div>
+                <div style={{ padding: 12, fontSize: 12, color: 'var(--mt-text-faint)' }}>{t('worldBook.emptyList')}</div>
               )}
               {entries.map((e) => {
                 const active = e.id === selectedId;
@@ -171,10 +173,10 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                       <span style={{ fontSize: 11 }}>{e.scope === 'global' ? '🌐' : '📌'}</span>
-                      <span style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{e.title || '（无标题）'}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{e.title || t('worldBook.untitled')}</span>
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--mt-text-faint)', marginTop: 2 }}>
-                      {e.scope === 'global' ? '全局常驻' : `挂载 ${e.entity_ids?.length || 0} 实体`} · 优先级 {e.priority}
+                      {e.scope === 'global' ? t('worldBook.globalResident') : t('worldBook.mountedEntities', { count: e.entity_ids?.length || 0 })} · {t('worldBook.priorityMeta', { n: e.priority })}
                     </div>
                   </div>
                 );
@@ -184,28 +186,28 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
 
           {/* ── editor ── */}
           <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: 16 }}>
-            {!selected && <div style={{ fontSize: 13, color: 'var(--mt-text-faint)' }}>选择或新建一个词条进行编辑。</div>}
+            {!selected && <div style={{ fontSize: 13, color: 'var(--mt-text-faint)' }}>{t('worldBook.selectOrCreate')}</div>}
             {selected && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <label>
-                  <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>标题</span>
+                  <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>{t('worldBook.fieldTitle')}</span>
                   <ImeInput value={selected.title} onCommit={(v) => save({ title: v })} style={fieldStyle} />
                 </label>
 
                 <div style={{ display: 'flex', gap: 12 }}>
                   <label style={{ flex: 1 }}>
-                    <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>作用域</span>
+                    <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>{t('worldBook.fieldScope')}</span>
                     <select
                       value={selected.scope}
                       onChange={(e) => save({ scope: e.target.value })}
                       style={{ ...fieldStyle, padding: '6px 6px' }}
                     >
-                      <option value="global">🌐 全局常驻（恒注入）</option>
-                      <option value="entity">📌 挂载实体（在场时注入）</option>
+                      <option value="global">{t('worldBook.scopeGlobalOption')}</option>
+                      <option value="entity">{t('worldBook.scopeEntityOption')}</option>
                     </select>
                   </label>
                   <label style={{ flex: '0 0 110px' }}>
-                    <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>优先级</span>
+                    <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>{t('worldBook.fieldPriority')}</span>
                     <input
                       type="number"
                       value={selected.priority}
@@ -214,13 +216,13 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
                     />
                   </label>
                   <label style={{ flex: '0 0 90px', display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>启用</span>
+                    <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>{t('worldBook.fieldEnabled')}</span>
                     <button
                       className={`mt-btn${selected.enabled ? ' active' : ''}`}
                       onClick={() => save({ enabled: selected.enabled ? 0 : 1 })}
                       style={{ padding: '6px 0', border: `1px solid ${selected.enabled ? 'var(--mt-accent)' : 'var(--mt-border)'}` }}
                     >
-                      {selected.enabled ? '✓ 启用' : '✕ 停用'}
+                      {selected.enabled ? t('worldBook.enabledOn') : t('worldBook.enabledOff')}
                     </button>
                   </label>
                 </div>
@@ -228,10 +230,10 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
                 {selected.scope === 'entity' && (
                   <div>
                     <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>
-                      挂载到实体（任一在场即注入）
+                      {t('worldBook.mountToEntities')}
                     </span>
                     <div style={{ maxHeight: 140, overflowY: 'auto', border: '1px solid var(--mt-border-soft)', borderRadius: 4, background: '#fff', padding: 6 }}>
-                      {entities.length === 0 && <div style={{ fontSize: 11, color: 'var(--mt-text-faint)' }}>（无实体）</div>}
+                      {entities.length === 0 && <div style={{ fontSize: 11, color: 'var(--mt-text-faint)' }}>{t('worldBook.noEntities')}</div>}
                       {entities.map((e) => {
                         const checked = (selected.entity_ids || []).includes(e.id);
                         return (
@@ -246,12 +248,12 @@ export default function WorldBookDialog({ open, onClose }: WorldBookDialogProps)
                 )}
 
                 <label>
-                  <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>内容（markdown）</span>
+                  <span style={{ fontSize: 12, color: 'var(--mt-text-muted)', display: 'block', marginBottom: 4 }}>{t('worldBook.fieldContent')}</span>
                   <ImeTextarea value={selected.content} onCommit={(v) => save({ content: v })} rows={12} style={{ ...fieldStyle, fontFamily: 'ui-monospace, monospace', fontSize: 12, lineHeight: 1.6 }} />
                 </label>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button className="mt-btn" onClick={() => handleDelete(selected.id)} style={{ fontSize: 12, padding: '4px 12px', border: '1px solid var(--mt-border)', color: '#c0392b' }}>🗑️ 删除词条</button>
+                  <button className="mt-btn" onClick={() => handleDelete(selected.id)} style={{ fontSize: 12, padding: '4px 12px', border: '1px solid var(--mt-border)', color: '#c0392b' }}>{t('worldBook.deleteEntry')}</button>
                 </div>
               </div>
             )}

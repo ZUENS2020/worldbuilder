@@ -1,5 +1,6 @@
 import { memo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { useTranslation } from 'react-i18next';
 import type { Entity, EntityType } from '../../types';
 import { ENTITY_CONFIG } from '../../types';
 
@@ -17,6 +18,7 @@ import { ENTITY_CONFIG } from '../../types';
  * Locations (infrastructure): Diamond, smallest, peripheral.
  */
 function EntityNode({ data, selected }: NodeProps) {
+  const { t } = useTranslation();
   const entity = data.entity as Entity;
   const config = ENTITY_CONFIG[entity.type as EntityType] || ENTITY_CONFIG.character;
   const aiInferred = !!(entity.properties as Record<string, unknown> | undefined)?.ai_inferred;
@@ -107,7 +109,7 @@ function EntityNode({ data, selected }: NodeProps) {
           }}>
             <span style={{ filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.3))' }}>{config.icon}</span>
             {aiInferred && (
-              <span title="AI 推断" style={{
+              <span title={t('common.aiInferred')} style={{
                 position: 'absolute', top: -4, right: -4, fontSize: 9, background: '#fff',
                 borderRadius: '50%', border: '1px solid var(--mt-border)', width: 15, height: 15,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',

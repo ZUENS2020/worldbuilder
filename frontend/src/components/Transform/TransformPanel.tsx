@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../stores/appStore';
 import { ENTITY_CONFIG, getGraphHops } from '../../types';
 import type { TransformDef } from '../../types';
 
 /** Docked Transform panel — lives in the Inspector tab bar, not a floating overlay. */
 export default function TransformPanel() {
+  const { t: tr } = useTranslation();
   const {
     project, selectedEntityId, entities, transforms, loadTransforms,
     executeTransform, executeAllGraphTransforms, removeEntity,
@@ -32,8 +34,8 @@ export default function TransformPanel() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--mt-text-muted)', fontSize: 12, textAlign: 'center', padding: 16 }}>
         <div>
           <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.5 }}>🕸️</div>
-          选择一个实体后在此运行 Transform<br />
-          <span style={{ fontSize: 11 }}>右键节点可快速切到此面板</span>
+          {tr('transform.emptyTitle')}<br />
+          <span style={{ fontSize: 11 }}>{tr('transform.emptyHint')}</span>
         </div>
       </div>
     );
@@ -73,7 +75,7 @@ export default function TransformPanel() {
   };
 
   const handleDelete = async () => {
-    if (confirm(`确定删除「${entity.name}」？`)) {
+    if (confirm(tr('transform.deleteConfirm', { name: entity.name }))) {
       await removeEntity(entity.id);
     }
   };
@@ -100,7 +102,7 @@ export default function TransformPanel() {
         <span style={{ width: 16, textAlign: 'center', color: isAI ? '#8e5cc4' : '#2faa5e' }}>
           {executing === t.id ? <span className="mt-spin">⏳</span> : isAI ? '🤖' : '▸'}
         </span>
-        <span style={{ flex: 1 }}>{t.label}</span>
+        <span style={{ flex: 1 }}>{tr(t.label)}</span>
       </div>
     );
   };
@@ -133,7 +135,7 @@ export default function TransformPanel() {
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entity.name}</div>
-          <div style={{ color: config.color, fontSize: 10 }}>{config.label}</div>
+          <div style={{ color: config.color, fontSize: 10 }}>{tr(config.label)}</div>
         </div>
       </div>
 
@@ -152,18 +154,18 @@ export default function TransformPanel() {
             <span style={{ color: '#2faa5e' }}>
               {executing === '__all__' ? <span className="mt-spin">⏳</span> : '▶'}
             </span>
-            运行全部展开 Transform
+            {tr('transform.runAllExpand')}
           </div>
         )}
 
         {transforms.length === 0 && (
-          <div style={{ padding: '8px 12px', color: 'var(--mt-text-muted)', fontSize: 11 }}>加载中...</div>
+          <div style={{ padding: '8px 12px', color: 'var(--mt-text-muted)', fontSize: 11 }}>{tr('common.loading')}</div>
         )}
 
-        {graphTransforms.length > 0 && sectionHeader('图谱展开 Graph')}
+        {graphTransforms.length > 0 && sectionHeader(tr('transform.sectionGraph'))}
         {graphTransforms.map(Row)}
 
-        {aiTransforms.length > 0 && sectionHeader('AI Transform')}
+        {aiTransforms.length > 0 && sectionHeader(tr('transform.sectionAI'))}
         {aiTransforms.map(Row)}
 
         {emptyHint && (
@@ -174,8 +176,8 @@ export default function TransformPanel() {
               color: '#8a6d1a', lineHeight: 1.5,
             }}
           >
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>暂无可展开的关联</div>
-            <div style={{ marginBottom: 6, color: '#9a7d2a' }}>这个实体在该方向上还没有记录关系。</div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>{tr('transform.noRelationsTitle')}</div>
+            <div style={{ marginBottom: 6, color: '#9a7d2a' }}>{tr('transform.noRelationsHint')}</div>
             {aiTransforms.some((t) => t.id === 'ai_infer') && (
               <button
                 className="mt-btn"
@@ -183,22 +185,22 @@ export default function TransformPanel() {
                 disabled={!!executing}
                 onClick={() => { const t = aiTransforms.find((x) => x.id === 'ai_infer'); if (t) handleTransform(t); }}
               >
-                🤖 让 AI 推断潜在关联
+                {tr('transform.aiInferBtn')}
               </button>
             )}
           </div>
         )}
 
-        {sectionHeader('画布 Canvas')}
+        {sectionHeader(tr('transform.sectionCanvas'))}
         <div
           onClick={() => isolateSubgraph(entityId)}
           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, color: 'var(--mt-text)' }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--mt-btn-hover)'; }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-          title={`只在画布上保留该节点 ${isolateHop} 跳内的关联，进入探索模式`}
+          title={tr('transform.isolateTip', { hops: isolateHop })}
         >
           <span style={{ width: 16, textAlign: 'center', color: 'var(--mt-accent)' }}>🎯</span>
-          <span style={{ flex: 1 }}>只看此子图（{isolateHop} 跳）</span>
+          <span style={{ flex: 1 }}>{tr('transform.isolateLabel', { hops: isolateHop })}</span>
         </div>
         {explorationMode && (
           <div
@@ -206,10 +208,10 @@ export default function TransformPanel() {
             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, color: 'var(--mt-text)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--mt-btn-hover)'; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-            title="从画布隐藏此节点（不会删除数据）"
+            title={tr('transform.hideTip')}
           >
             <span style={{ width: 16, textAlign: 'center', color: 'var(--mt-text-muted)' }}>🫥</span>
-            <span style={{ flex: 1 }}>从画布隐藏</span>
+            <span style={{ flex: 1 }}>{tr('transform.hideLabel')}</span>
           </div>
         )}
 
@@ -220,7 +222,7 @@ export default function TransformPanel() {
             onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#fdecea'; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
           >
-            🗑️ 删除实体
+            {tr('transform.deleteEntity')}
           </div>
         </div>
 
@@ -241,7 +243,7 @@ export default function TransformPanel() {
         {activeTransformHighlight && (
           <div style={{ margin: '0 8px 8px', display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 10, color: 'var(--mt-text-muted)', flex: 1 }}>
-              高亮中 · 点击画布空白处取消
+              {tr('transform.highlighting')}
             </span>
             <button
               type="button"
@@ -249,7 +251,7 @@ export default function TransformPanel() {
               style={{ fontSize: 10, padding: '2px 8px', border: '1px solid var(--mt-border)' }}
               onClick={() => clearTransformHighlight()}
             >
-              清除高亮
+              {tr('transform.clearHighlight')}
             </button>
           </div>
         )}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../stores/appStore';
 import { ENTITY_CONFIG, getRelationConfig } from '../../types';
 import type { EntityType } from '../../types';
@@ -20,6 +21,7 @@ interface AISuggestionReviewProps {
 }
 
 export default function AISuggestionReview({ candidates, onAccept, onDismiss }: AISuggestionReviewProps) {
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<number>>(new Set(candidates.map((_, i) => i)));
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [edits, setEdits] = useState<Record<number, Partial<Candidate>>>({});
@@ -76,9 +78,9 @@ export default function AISuggestionReview({ candidates, onAccept, onDismiss }: 
           padding: '12px 16px', borderBottom: '1px solid var(--mt-border)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>🔮 AI 推断结果预览</span>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>{t('aiReview.title')}</span>
           <span style={{ color: 'var(--mt-text-muted)', fontSize: 11 }}>
-            勾选后点「应用所选」入库，未勾选的将被丢弃
+            {t('aiReview.hint')}
           </span>
         </div>
 
@@ -127,7 +129,7 @@ export default function AISuggestionReview({ candidates, onAccept, onDismiss }: 
                           borderRadius: 3, color: 'var(--mt-text)' }}
                       >
                         {Object.entries(allRelConfig).map(([k, v]) => (
-                          <option key={k} value={k}>{v.label}</option>
+                          <option key={k} value={k}>{t(v.label)}</option>
                         ))}
                       </select>
                       <button
@@ -139,12 +141,12 @@ export default function AISuggestionReview({ candidates, onAccept, onDismiss }: 
                   ) : (
                     <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontWeight: 500, fontSize: 13 }}>{edited.target_name}</span>
-                      {c.exists && <span style={{ fontSize: 9, color: 'var(--mt-text-muted)', background: 'var(--mt-window)', padding: '0 4px', borderRadius: 3 }}>已存在</span>}
+                      {c.exists && <span style={{ fontSize: 9, color: 'var(--mt-text-muted)', background: 'var(--mt-window)', padding: '0 4px', borderRadius: 3 }}>{t('aiReview.exists')}</span>}
                       <span style={{
                         color: relConfig.color, fontSize: 10,
                         background: `${relConfig.color}22`, padding: '1px 6px', borderRadius: 3,
                       }}>
-                        {relConfig.label}
+                        {t(relConfig.label)}
                       </span>
                       <span style={{ color: 'var(--mt-text-muted)', fontSize: 10 }}>
                         {Math.round(edited.confidence * 100)}%
@@ -173,14 +175,14 @@ export default function AISuggestionReview({ candidates, onAccept, onDismiss }: 
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <span style={{ color: 'var(--mt-text-muted)', fontSize: 11 }}>
-            已选 {selected.size}/{candidates.length} 项
+            {t('aiReview.selectedCount', { count: selected.size, total: candidates.length })}
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="mt-btn" onClick={onDismiss}
-              style={{ border: '1px solid var(--mt-border)' }}>取消</button>
+              style={{ border: '1px solid var(--mt-border)' }}>{t('common.cancel')}</button>
             <button className="mt-btn active" onClick={handleAccept}
               style={{ fontWeight: 600, border: '1px solid var(--mt-accent)' }}>
-              应用所选 ({selected.size})
+              {t('aiReview.applySelected', { count: selected.size })}
             </button>
           </div>
         </div>

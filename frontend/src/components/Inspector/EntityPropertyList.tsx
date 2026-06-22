@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ImeInput, ImeTextarea } from '../common/ImeInput';
 import Markdown from '../common/Markdown';
 import {
@@ -40,6 +41,7 @@ export default function EntityPropertyList({
   onAdd,
   allEntities = [],
 }: EntityPropertyListProps) {
+  const { t } = useTranslation();
   const propertyEntries = getOrderedPropertyEntries(properties);
   const propertiesRef = useRef(properties);
   propertiesRef.current = properties;
@@ -119,7 +121,7 @@ export default function EntityPropertyList({
   };
 
   const handleDeleteProperty = (key: string) => {
-    if (!confirm(`删除属性「${key}」？`)) return;
+    if (!confirm(t('propList.deleteConfirm', { key }))) return;
     const entries = getOrderedPropertyEntries(propertiesRef.current).filter(([k]) => k !== key);
     updateEntity(entityId, { properties: buildPropertiesWithOrder(entries, propertiesRef.current) });
   };
@@ -127,17 +129,17 @@ export default function EntityPropertyList({
   return (
     <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--mt-border-soft)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <span style={sectionLabel}>属性 Properties</span>
-        <button className="mt-btn" onClick={onAdd} style={{ fontSize: 10, padding: '1px 6px', border: '1px solid var(--mt-border)' }}>＋ 添加</button>
+        <span style={sectionLabel}>{t('propList.title')}</span>
+        <button className="mt-btn" onClick={onAdd} style={{ fontSize: 10, padding: '1px 6px', border: '1px solid var(--mt-border)' }}>{t('propList.add')}</button>
       </div>
       {propertyEntries.length > 1 && (
         <div style={{ fontSize: 10, color: 'var(--mt-text-faint)', marginBottom: 6 }}>
-          拖拽 ⋮⋮ 调整顺序
+          {t('propList.dragHint')}
         </div>
       )}
       <div ref={listRef}>
         {propertyEntries.length === 0 && (
-          <div style={{ color: 'var(--mt-text-faint)', fontSize: 11 }}>（暂无属性）</div>
+          <div style={{ color: 'var(--mt-text-faint)', fontSize: 11 }}>{t('propList.empty')}</div>
         )}
         {propertyEntries.map(([key, value], index) => {
           const isString = typeof value === 'string';
@@ -159,7 +161,7 @@ export default function EntityPropertyList({
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'space-between', marginBottom: 2 }}>
                 <span
                   onPointerDown={(e) => onGripPointerDown(e, index)}
-                  title="拖拽调整顺序"
+                  title={t('propList.dragTip')}
                   style={{
                     cursor: dragIndex !== null ? 'grabbing' : 'grab',
                     color: 'var(--mt-text-faint)',
@@ -182,7 +184,7 @@ export default function EntityPropertyList({
                       color: (propVisMap[key]?.level ?? 'public') === 'public' ? 'var(--mt-text-faint)' : 'var(--mt-accent)',
                     }}
                     onClick={() => setVisKey(visKey === key ? null : key)}
-                    title={`可见度：${propVisMap[key]?.level === 'private' ? '私密' : propVisMap[key]?.level === 'entities' ? '指定实体' : '公开'}`}
+                    title={t('propList.visTip', { level: propVisMap[key]?.level === 'private' ? t('propList.levelPrivate') : propVisMap[key]?.level === 'entities' ? t('propList.levelEntities') : t('propList.levelPublic') })}
                   >
                     {VIS_ICON[propVisMap[key]?.level ?? 'public']}
                   </button>
@@ -191,9 +193,9 @@ export default function EntityPropertyList({
                       className="mt-btn"
                       style={{ fontSize: 9, padding: '0 5px', height: 16, color: 'var(--mt-text-muted)' }}
                       onClick={() => toggleInlineEdit(key)}
-                      title={inlineEditFields.has(key) ? '完成编辑（显示渲染）' : '内联编辑源码'}
+                      title={inlineEditFields.has(key) ? t('propList.editDone') : t('propList.editSource')}
                     >
-                      {inlineEditFields.has(key) ? '✓ 完成' : '✎ 编辑'}
+                      {inlineEditFields.has(key) ? t('propList.done') : t('propList.edit')}
                     </button>
                   )}
                   {isString && (
@@ -201,16 +203,16 @@ export default function EntityPropertyList({
                       className="mt-btn"
                       style={{ fontSize: 9, padding: '0 5px', height: 16, color: 'var(--mt-accent)' }}
                       onClick={() => setEditingField(key)}
-                      title="放大编辑"
+                      title={t('propList.expandTip')}
                     >
-                      ⤢ 放大
+                      {t('propList.expand')}
                     </button>
                   )}
                   <button
                     className="mt-btn"
                     style={{ fontSize: 9, padding: '0 5px', height: 16, color: '#c0392b' }}
                     onClick={() => handleDeleteProperty(key)}
-                    title="删除属性"
+                    title={t('propList.deleteTip')}
                   >
                     ✕
                   </button>
@@ -244,7 +246,7 @@ export default function EntityPropertyList({
                   marginTop: 5, padding: 7, borderRadius: 4,
                   border: '1px solid var(--mt-accent)', background: 'var(--mt-sel-fill)',
                 }}>
-                  <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 4 }}>谁能看到此属性</div>
+                  <div style={{ fontSize: 10, color: 'var(--mt-text-muted)', marginBottom: 4 }}>{t('propList.whoCanSee')}</div>
                   <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
                     {(['public', 'private', 'entities'] as const).map((lvl) => {
                       const active = (propVisMap[key]?.level ?? 'public') === lvl;
@@ -257,7 +259,7 @@ export default function EntityPropertyList({
                             ? { level: 'entities', entities: propVisMap[key]?.entities ?? [] }
                             : { level: lvl })}
                         >
-                          {VIS_ICON[lvl]} {lvl === 'public' ? '公开' : lvl === 'private' ? '私密' : '指定'}
+                          {VIS_ICON[lvl]} {lvl === 'public' ? t('propList.levelPublic') : lvl === 'private' ? t('propList.levelPrivate') : t('propList.levelEntitiesShort')}
                         </button>
                       );
                     })}
@@ -265,7 +267,7 @@ export default function EntityPropertyList({
                   {(propVisMap[key]?.level === 'entities') && (
                     <div style={{ maxHeight: 140, overflowY: 'auto', border: '1px solid var(--mt-border-soft)', borderRadius: 3, background: '#fff', padding: 4 }}>
                       {allEntities.length === 0 && (
-                        <div style={{ fontSize: 10, color: 'var(--mt-text-faint)' }}>（无其他实体）</div>
+                        <div style={{ fontSize: 10, color: 'var(--mt-text-faint)' }}>{t('propList.noOtherEntities')}</div>
                       )}
                       {allEntities.map((e) => {
                         const checked = (propVisMap[key]?.entities ?? []).includes(e.id);

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useSimStore } from '../../stores/simStore';
 
 /**
@@ -5,6 +6,7 @@ import { useSimStore } from '../../stores/simStore';
  * scrolls to and highlights that tick. "最新" snaps back to the live tail.
  */
 export default function TickTimeline() {
+  const { t } = useTranslation();
   const sim = useSimStore((s) => s.sim);
   const ticks = useSimStore((s) => s.ticks);
   const scrubTick = useSimStore((s) => s.scrubTick);
@@ -22,7 +24,7 @@ export default function TickTimeline() {
       background: 'var(--mt-panel-header)',
     }}>
       <span style={{ fontSize: 11, color: 'var(--mt-text-muted)', whiteSpace: 'nowrap' }}>
-        回放 <b style={{ color: 'var(--mt-accent-dark)' }}>t{pos}</b> / {maxTick}
+        {t('tickTimeline.replay')} <b style={{ color: 'var(--mt-accent-dark)' }}>t{pos}</b> / {maxTick}
       </span>
       <input
         type="range"
@@ -40,9 +42,9 @@ export default function TickTimeline() {
         style={{ fontSize: 10, padding: '2px 8px' }}
         disabled={scrubTick == null}
         onClick={() => setScrubTick(null)}
-        title="跳回最新 tick"
+        title={t('tickTimeline.toLatestTip')}
       >
-        ↺ 最新
+        {t('tickTimeline.latest')}
       </button>
     </div>
   );

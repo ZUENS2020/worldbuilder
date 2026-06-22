@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState, useEffect, useLayoutEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ReactFlow,
   Background,
@@ -107,6 +108,7 @@ export default function Canvas() {
     setInspectorTab, activeTransformHighlight, clearTransformHighlight,
     tags,
   } = useAppStore();
+  const { t } = useTranslation();
   const rf = useReactFlow();
 
   const [selectionTool, setSelectionTool] = useState<SelectionTool>('pointer');
@@ -563,7 +565,8 @@ export default function Canvas() {
       e.preventDefault();
       const type = e.dataTransfer.getData(DND_MIME) as EntityType;
       if (!type || !project) return;
-      const name = prompt(`新建「${ENTITY_CONFIG[type]?.label || type}」名称:`);
+      const typeLabel = ENTITY_CONFIG[type]?.label ? t(ENTITY_CONFIG[type].label) : type;
+      const name = prompt(t('canvas.newEntityPrompt', { label: typeLabel }));
       if (!name || !name.trim()) return;
       const pos = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const created = await addEntity({ name: name.trim(), type });
@@ -677,7 +680,7 @@ export default function Canvas() {
             }}
           >
             <span style={{ fontSize: 11, color: observerId ? 'var(--mt-accent-dark)' : 'var(--mt-text-muted)', fontWeight: 600 }}>
-              {observerId ? '👁 视角' : '👁 全知'}
+              {observerId ? t('canvas.viewAs') : t('canvas.omniscient')}
             </span>
             <select
               value={observerId ?? ''}
@@ -687,9 +690,9 @@ export default function Canvas() {
                 border: `1px solid ${observerId ? 'var(--mt-accent)' : 'var(--mt-border)'}`,
                 borderRadius: 3, background: '#fff', color: 'var(--mt-text)',
               }}
-              title="以某角色视角查看：看不到的实体会消失（战争迷雾）"
+              title={t('canvas.observerSelectTip')}
             >
-              <option value="">全知（作者视角）</option>
+              <option value="">{t('canvas.omniscientOption')}</option>
               {entities
                 .filter((e) => e.type === 'character')
                 .map((e) => (
@@ -698,7 +701,7 @@ export default function Canvas() {
             </select>
             {observerId && observerVisibleSet && (
               <span style={{ fontSize: 10, color: 'var(--mt-text-muted)' }}>
-                可见 {observerVisibleSet.size}/{entities.length}
+                {t('canvas.visibleCount', { visible: observerVisibleSet.size, total: entities.length })}
               </span>
             )}
           </div>
@@ -716,18 +719,18 @@ export default function Canvas() {
                 className="mt-btn"
                 style={{ fontSize: 11, padding: '3px 9px', fontWeight: 600, border: '1px solid var(--mt-border)' }}
                 onClick={() => setExplorationMode(true)}
-                title="进入探索模式：从选中的节点出发，右键 Transform 逐步展开关联"
+                title={t('canvas.enterExplorationTip')}
               >
-                🔭 探索模式
+                {t('canvas.enterExploration')}
               </button>
             ) : (
               <>
                 {/* Status only — exiting is handled by the dedicated button below. */}
                 <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--mt-accent-dark)', padding: '0 2px' }}>
-                  🔭 探索中
+                  {t('canvas.exploring')}
                 </span>
                 <span style={{ fontSize: 10, color: 'var(--mt-text-muted)' }}>
-                  {visibleEntityIds.size} 个节点
+                  {t('canvas.nodeCount', { count: visibleEntityIds.size })}
                 </span>
                 <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--mt-border-soft)', margin: '0 2px' }} />
                 <button
@@ -735,34 +738,34 @@ export default function Canvas() {
                   style={{ fontSize: 10, padding: '3px 8px', border: '1px solid var(--mt-border)' }}
                   onClick={() => undoExploration()}
                   disabled={explorationHistory.length === 0}
-                  title="退回上一步展开"
+                  title={t('canvas.undoStepTip')}
                 >
-                  ↩ 退回上一步
+                  {t('canvas.undoStep')}
                 </button>
                 <button
                   className="mt-btn"
                   style={{ fontSize: 10, padding: '3px 8px', border: '1px solid var(--mt-border)' }}
                   onClick={() => resetExploration()}
-                  title="恢复到刚进入探索时的起点状态"
+                  title={t('canvas.resetExplorationTip')}
                 >
-                  ⟲ 恢复初始状态
+                  {t('canvas.resetExploration')}
                 </button>
                 <button
                   className="mt-btn"
                   style={{ fontSize: 10, padding: '3px 8px', border: '1px solid var(--mt-border)' }}
                   onClick={() => showAllEntities()}
-                  title="把项目里所有实体都加入画布"
+                  title={t('canvas.showAllTip')}
                 >
-                  显示全部
+                  {t('canvas.showAll')}
                 </button>
                 <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--mt-border-soft)', margin: '0 2px' }} />
                 <button
                   className="mt-btn"
                   style={{ fontSize: 10, padding: '3px 8px', border: '1px solid var(--mt-border)', color: '#c0392b' }}
                   onClick={() => setExplorationMode(false)}
-                  title="退出探索模式，回到全览"
+                  title={t('canvas.exitExplorationTip')}
                 >
-                  ✕ 退出探索
+                  {t('canvas.exitExploration')}
                 </button>
               </>
             )}
@@ -796,19 +799,19 @@ export default function Canvas() {
                 boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
               }}
             >
-              <span style={{ color: 'var(--mt-text-muted)', fontSize: 10, marginRight: 2 }}>链路类型</span>
+              <span style={{ color: 'var(--mt-text-muted)', fontSize: 10, marginRight: 2 }}>{t('canvas.linkTypes')}</span>
               <button
                 className={`mt-btn${!relationFilter ? ' active' : ''}`}
                 style={{ fontSize: 10, padding: '2px 7px', border: '1px solid var(--mt-border)' }}
                 onClick={() => setRelationFilter(undefined)}
               >
-                全部
+                {t('canvas.all')}
               </button>
               {/* Group 1: Character links (rival/ally/mentor/family/enemy) */}
-              {CHAR_LINK_TYPES.filter(t => relationTypes.includes(t)).length > 0 && (
-                <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>│ 人物</span>
+              {CHAR_LINK_TYPES.filter(rt => relationTypes.includes(rt)).length > 0 && (
+                <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>{t('canvas.groupChar')}</span>
               )}
-              {CHAR_LINK_TYPES.filter(t => relationTypes.includes(t)).map((rt) => {
+              {CHAR_LINK_TYPES.filter(rt => relationTypes.includes(rt)).map((rt) => {
                 const config = allRelConfig[rt] || { color: '#888', label: rt };
                 const on = relationFilter === rt;
                 return (
@@ -824,15 +827,15 @@ export default function Canvas() {
                       fontWeight: on ? 600 : 400,
                     }}
                   >
-                    {config.label}
+                    {t(config.label)}
                   </button>
                 );
               })}
               {/* Group 2: Association links */}
-              {ASSOC_LINK_TYPES.filter(t => relationTypes.includes(t)).length > 0 && (
-                <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>│ 关联</span>
+              {ASSOC_LINK_TYPES.filter(rt => relationTypes.includes(rt)).length > 0 && (
+                <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>{t('canvas.groupAssoc')}</span>
               )}
-              {ASSOC_LINK_TYPES.filter(t => relationTypes.includes(t)).map((rt) => {
+              {ASSOC_LINK_TYPES.filter(rt => relationTypes.includes(rt)).map((rt) => {
                 const config = allRelConfig[rt] || { color: '#888', label: rt };
                 const on = relationFilter === rt;
                 return (
@@ -847,14 +850,14 @@ export default function Canvas() {
                       color: on ? config.color : 'var(--mt-text)',
                     }}
                   >
-                    {config.label}
+                    {t(config.label)}
                   </button>
                 );
               })}
               {/* Group 3: Infrastructure links (located_at) — toggle */}
               {relationTypes.includes('located_at') && (
                 <>
-                  <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>│ 基础</span>
+                  <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>{t('canvas.groupInfra')}</span>
                   <button
                     onClick={() => setRelationFilter(relationFilter === 'located_at' ? undefined : 'located_at')}
                     className="mt-btn"
@@ -865,14 +868,14 @@ export default function Canvas() {
                       color: relationFilter === 'located_at' ? '#666' : 'var(--mt-text-muted)',
                     }}
                   >
-                    📍 位置
+                    {t('canvas.located')}
                   </button>
                 </>
               )}
               {/* Group 4: Custom relation types */}
               {customRelationTypes.filter(ct => relationTypes.includes(ct.id)).length > 0 && (
                 <>
-                  <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>│ 自定义</span>
+                  <span style={{ color: 'var(--mt-text-faint)', fontSize: 9, margin: '0 2px' }}>{t('canvas.groupCustom')}</span>
                   {customRelationTypes.filter(ct => relationTypes.includes(ct.id)).map((ct) => {
                     const on = relationFilter === ct.id;
                     return (
@@ -918,16 +921,16 @@ export default function Canvas() {
             <div style={{ textAlign: 'center', marginBottom: 12 }}>
               <div style={{ fontSize: 32, marginBottom: 6 }}>🔭</div>
               <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, color: 'var(--mt-accent-dark)' }}>
-                选择一个调查起点
+                {t('canvas.seedTitle')}
               </div>
               <div style={{ fontSize: 12, color: 'var(--mt-text-muted)', lineHeight: 1.5 }}>
-                选中起点后右键节点运行 Transform 逐步展开关联。
+                {t('canvas.seedHint')}
               </div>
             </div>
 
             {entities.length === 0 ? (
               <div style={{ fontSize: 12, color: 'var(--mt-text-muted)', textAlign: 'center', padding: '12px 0' }}>
-                当前项目还没有实体，先从左侧调色盘拖一个到画布。
+                {t('canvas.seedNoEntities')}
               </div>
             ) : (
               <>
@@ -935,7 +938,7 @@ export default function Canvas() {
                   autoFocus
                   value={seedSearch}
                   onChange={(e) => setSeedSearch(e.target.value)}
-                  placeholder="搜索实体名称…"
+                  placeholder={t('canvas.seedSearchPlaceholder')}
                   style={{
                     background: '#fff', border: '1px solid var(--mt-border)', borderRadius: 4,
                     padding: '7px 10px', fontSize: 13, outline: 'none', marginBottom: 8,
@@ -950,7 +953,7 @@ export default function Canvas() {
                       <button
                         key={e.id}
                         onClick={() => { focusOnEntity(e.id); setSeedSearch(''); }}
-                        title="作为起点放上画布"
+                        title={t('canvas.seedItemTip')}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 9, textAlign: 'left',
                           padding: '6px 9px', borderRadius: 4, border: '1px solid transparent',
@@ -966,14 +969,14 @@ export default function Canvas() {
                           justifyContent: 'center', fontSize: 12,
                         }}>{cfg.icon}</span>
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>{e.name}</span>
-                        <span style={{ fontSize: 10, color: cfg.color }}>{cfg.label}</span>
+                        <span style={{ fontSize: 10, color: cfg.color }}>{t(cfg.label)}</span>
                         <span style={{ fontSize: 10, color: 'var(--mt-text-faint)' }}>🔗 {deg}</span>
                       </button>
                     );
                   })}
                   {seedMatches.length === 0 && (
                     <div style={{ fontSize: 12, color: 'var(--mt-text-muted)', textAlign: 'center', padding: '10px 0' }}>
-                      没有匹配「{seedSearch}」的实体
+                      {t('canvas.seedNoMatch', { query: seedSearch })}
                     </div>
                   )}
                 </div>
@@ -983,7 +986,7 @@ export default function Canvas() {
                     style={{ fontSize: 11, padding: '4px 12px', border: '1px solid var(--mt-border)' }}
                     onClick={() => showAllEntities()}
                   >
-                    或：显示全部实体
+                    {t('canvas.seedShowAll')}
                   </button>
                 </div>
               </>
